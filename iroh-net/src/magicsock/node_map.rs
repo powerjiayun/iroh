@@ -25,7 +25,9 @@ use crate::{
     disco::{CallMeMaybe, Pong, SendAddr},
     key::PublicKey,
     relay::RelayUrl,
-    stun, NodeAddr,
+    stun,
+    util::watchable::Watcher,
+    NodeAddr,
 };
 
 mod best_addr;
@@ -426,7 +428,7 @@ impl NodeMapInner {
     fn conn_type_stream(&self, public_key: &PublicKey) -> anyhow::Result<ConnectionTypeStream> {
         match self.get(NodeStateKey::NodeId(public_key)) {
             Some(ep) => Ok(ConnectionTypeStream {
-                inner: Box::pin(ep.conn_type_stream()),
+                inner: ep.conn_type_stream(),
             }),
             None => anyhow::bail!("No endpoint for {public_key:?} found"),
         }
@@ -583,8 +585,7 @@ impl NodeMapInner {
 /// Stream returning `ConnectionTypes`
 #[derive(derive_more::Debug)]
 pub struct ConnectionTypeStream {
-    #[debug("connection type stream")]
-    inner: Pin<Box<dyn Stream<Item = ConnectionType> + Send + Sync>>,
+    inner: Watcher<ConnectionType>,
 }
 
 impl Stream for ConnectionTypeStream {
