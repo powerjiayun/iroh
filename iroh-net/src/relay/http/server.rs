@@ -16,6 +16,7 @@ use hyper::upgrade::Upgraded;
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
+#[cfg(feature = "iroh-relay")]
 use tokio_rustls_acme::AcmeAcceptor;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, info_span, warn, Instrument};
@@ -476,6 +477,7 @@ impl Inner {
 #[derive(Clone, derive_more::Debug)]
 pub enum TlsAcceptor {
     /// Uses Let's Encrypt as the Certificate Authority. This is used in production.
+    #[cfg(feature = "iroh-relay")]
     LetsEncrypt(#[debug("tokio_rustls_acme::AcmeAcceptor")] AcmeAcceptor),
     /// Manually added tls acceptor. Generally used for tests or for when we've passed in
     /// a certificate via a file.
@@ -519,8 +521,8 @@ impl RelayService {
 
     /// Serve the tls connection
     async fn tls_serve_connection(self, stream: TcpStream, tls_config: TlsConfig) -> Result<()> {
-        let TlsConfig { acceptor, config } = tls_config;
-        match acceptor {
+        match tls_config.acceptor {
+            #[cfg(feature = "iroh-relay")]
             TlsAcceptor::LetsEncrypt(a) => match a.accept(stream).await? {
                 None => {
                     info!("TLS[acme]: received TLS-ALPN-01 validation request");
@@ -528,7 +530,7 @@ impl RelayService {
                 Some(start_handshake) => {
                     debug!("TLS[acme]: start handshake");
                     let tls_stream = start_handshake
-                        .into_stream(config)
+                        .into_stream(tls_config.config)
                         .await
                         .context("TLS[acme] handshake")?;
                     self.serve_connection(MaybeTlsStreamServer::Tls(tls_stream))

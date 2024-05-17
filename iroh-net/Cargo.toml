@@ -48,7 +48,7 @@ pin-project = "1"
 pkarr = { version = "1.1.4", default-features = false, features = ["async", "relay"], optional = true }
 postcard = { version = "1", default-features = false, features = ["alloc", "use-std", "experimental-derive"] }
 quinn = { package = "iroh-quinn", version = "0.10.4", default-features = false, features = ["ring", "rustls"] }
-quinn-proto = { package = "iroh-quinn-proto", version = "0.10.7", default-features = false }
+quinn-proto = { package = "iroh-quinn-proto", version = "0.10.7", default-features = false, features = ["rustls"] }
 quinn-udp = { package = "iroh-quinn-udp", version = "0.4", default-features = false }
 rand = "0.8"
 rand_core = "0.6.4"
@@ -68,11 +68,11 @@ tokio-rustls = { version = "0.24" }
 tokio-util = { version = "0.7", features = ["io-util", "io", "codec"] }
 tracing = "0.1"
 url = { version = "2.4", features = ["serde"] }
-watchable = { version = "1.1.2", optional = true }
 webpki = { package = "rustls-webpki", version = "0.101.4", features = ["std"] }
 webpki-roots = "0.25"
 x509-parser = "0.15"
 z32 = "1.0.3"
+just-watch = "0.2.0"
 
 # iroh-relay
 clap = { version = "4", features = ["derive"], optional = true }
@@ -148,7 +148,6 @@ native = [
   "dep:stun-rs",
   "dep:surge-ping",
   "quinn/runtime-tokio",
-  "dep:watchable",
 ]
 wasm = [
   "ring/wasm32_unknown_unknown_js",

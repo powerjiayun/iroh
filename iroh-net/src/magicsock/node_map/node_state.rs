@@ -5,12 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use futures_lite::Stream;
 use iroh_metrics::inc;
 use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{debug, info, instrument, trace, warn};
-use watchable::{Watchable, WatcherStream};
 
 use crate::{
     disco::{self, SendAddr},
@@ -137,7 +137,10 @@ pub(super) struct NodeState {
     /// call-me-maybe messages as backup.
     last_call_me_maybe: Option<Instant>,
     /// The type of connection we have to the node, either direct, relay, mixed, or none.
-    conn_type: Watchable<ConnectionType>,
+    conn_type: (
+        just_watch::Sender<ConnectionType>,
+        just_watch::Receiver<ConnectionType>,
+    ),
 }
 
 #[derive(Debug)]
@@ -168,7 +171,7 @@ impl NodeState {
             direct_addr_state: BTreeMap::new(),
             last_used: options.active.then(Instant::now),
             last_call_me_maybe: None,
-            conn_type: Watchable::new(ConnectionType::None),
+            conn_type: just_watch::channel(ConnectionType::None),
         }
     }
 
@@ -184,17 +187,18 @@ impl NodeState {
         self.id
     }
 
-    pub(super) fn conn_type(&self) -> ConnectionType {
-        self.conn_type.get()
-    }
-
-    pub(super) fn conn_type_stream(&self) -> WatcherStream<ConnectionType> {
-        self.conn_type.watch().into_stream()
+    pub(super) fn conn_type_stream(&self) -> impl Stream<Item = ConnectionType> {
+        let receiver = self.conn_type.1.clone();
+        let seed = receiver.borrow().clone();
+        futures_lite::stream::unfold(seed, move |n| {
+            let mut receiver = receiver.clone();
+            async move { receiver.recv().await.ok().map(|val| (n, val)) }
+        })
     }
 
     /// Returns info about this endpoint
     pub(super) fn info(&self, now: Instant) -> NodeInfo {
-        let conn_type = self.conn_type.get();
+        let conn_type = self.conn_type.1.borrow().clone();
         let latency = match conn_type {
             ConnectionType::Direct(addr) => self
                 .direct_addr_state
@@ -302,10 +306,9 @@ impl NodeState {
             (None, Some(relay_url)) => ConnectionType::Relay(relay_url),
             (None, None) => ConnectionType::None,
         };
-        if self.conn_type.update(typ).is_ok() {
-            let typ = self.conn_type.get();
-            info!(%typ, "new connection type");
-        }
+        self.conn_type.0.send(typ.clone()).ok();
+        info!(%typ, "new connection type");
+
         (best_addr, relay_url)
     }
 
@@ -1526,7 +1529,7 @@ mod tests {
                     sent_pings: HashMap::new(),
                     last_used: Some(now),
                     last_call_me_maybe: None,
-                    conn_type: Watchable::new(ConnectionType::Direct(ip_port.into())),
+                    conn_type: just_watch::channel(ConnectionType::Direct(ip_port.into())),
                 },
                 ip_port.into(),
             )
@@ -1546,7 +1549,7 @@ mod tests {
                 sent_pings: HashMap::new(),
                 last_used: Some(now),
                 last_call_me_maybe: None,
-                conn_type: Watchable::new(ConnectionType::Relay(send_addr.clone())),
+                conn_type: just_watch::channel(ConnectionType::Relay(send_addr.clone())),
             }
         };
 
@@ -1566,7 +1569,7 @@ mod tests {
                 sent_pings: HashMap::new(),
                 last_used: Some(now),
                 last_call_me_maybe: None,
-                conn_type: Watchable::new(ConnectionType::Relay(send_addr.clone())),
+                conn_type: just_watch::channel(ConnectionType::Relay(send_addr.clone())),
             }
         };
 
@@ -1601,7 +1604,7 @@ mod tests {
                     sent_pings: HashMap::new(),
                     last_used: Some(now),
                     last_call_me_maybe: None,
-                    conn_type: Watchable::new(ConnectionType::Mixed(
+                    conn_type: just_watch::channel(ConnectionType::Mixed(
                         socket_addr,
                         send_addr.clone(),
                     )),

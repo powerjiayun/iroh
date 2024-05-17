@@ -426,8 +426,7 @@ impl NodeMapInner {
     fn conn_type_stream(&self, public_key: &PublicKey) -> anyhow::Result<ConnectionTypeStream> {
         match self.get(NodeStateKey::NodeId(public_key)) {
             Some(ep) => Ok(ConnectionTypeStream {
-                initial: Some(ep.conn_type()),
-                inner: ep.conn_type_stream(),
+                inner: Box::pin(ep.conn_type_stream()),
             }),
             None => anyhow::bail!("No endpoint for {public_key:?} found"),
         }
@@ -582,10 +581,10 @@ impl NodeMapInner {
 }
 
 /// Stream returning `ConnectionTypes`
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 pub struct ConnectionTypeStream {
-    initial: Option<ConnectionType>,
-    inner: watchable::WatcherStream<ConnectionType>,
+    #[debug("connection type stream")]
+    inner: Pin<Box<dyn Stream<Item = ConnectionType> + Send + Sync>>,
 }
 
 impl Stream for ConnectionTypeStream {
@@ -593,9 +592,6 @@ impl Stream for ConnectionTypeStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = &mut *self;
-        if let Some(initial_conn_type) = this.initial.take() {
-            return Poll::Ready(Some(initial_conn_type));
-        }
         Pin::new(&mut this.inner).poll_next(cx)
     }
 }

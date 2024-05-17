@@ -46,7 +46,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::{
     debug, error, error_span, info, info_span, instrument, trace, trace_span, warn, Instrument,
 };
-use watchable::Watchable;
 
 use crate::{
     config,
@@ -198,7 +197,10 @@ pub(super) struct MagicSock {
     /// None (or zero nodes) means relay is disabled.
     relay_map: RelayMap,
     /// Nearest relay node ID; 0 means none/unknown.
-    my_relay: Watchable<Option<RelayUrl>>,
+    my_relay: (
+        just_watch::Sender<Option<RelayUrl>>,
+        just_watch::Receiver<Option<RelayUrl>>,
+    ),
     /// Tracks the networkmap node entity for each node discovery key.
     node_map: NodeMap,
     /// UDP IPv4 socket
@@ -220,7 +222,10 @@ pub(super) struct MagicSock {
     discovery: Option<Box<dyn Discovery>>,
 
     /// Our discovered endpoints
-    endpoints: Watchable<DiscoveredEndpoints>,
+    endpoints: (
+        just_watch::Sender<DiscoveredEndpoints>,
+        just_watch::Receiver<DiscoveredEndpoints>,
+    ),
 
     /// List of CallMeMaybe disco messages that should be sent out after the next endpoint update
     /// completes
@@ -246,14 +251,16 @@ impl MagicSock {
     ///
     /// If `None`, then we are not connected to any relay nodes.
     pub fn my_relay(&self) -> Option<RelayUrl> {
-        self.my_relay.get()
+        self.my_relay.1.borrow().clone()
     }
 
     /// Sets the relay node with the best latency.
     ///
     /// If we are not connected to any relay nodes, set this to `None`.
     fn set_my_relay(&self, my_relay: Option<RelayUrl>) -> Option<RelayUrl> {
-        self.my_relay.replace(my_relay)
+        let current = self.my_relay();
+        self.my_relay.0.send(my_relay).ok();
+        current
     }
 
     fn is_closing(&self) -> bool {
@@ -304,9 +311,19 @@ impl MagicSock {
     ///
     /// To get the current endpoints, drop the stream after the first item was received.
     pub fn local_endpoints(&self) -> LocalEndpointsStream {
+        let receiver = self.endpoints.1.clone();
+        let seed = receiver.borrow().clone();
+
+        let stream = futures_lite::stream::unfold(seed, move |last| {
+            let mut receiver = receiver.clone();
+            async move {
+                let next = receiver.recv().await.ok()?;
+                Some((last, next))
+            }
+        });
+
         LocalEndpointsStream {
-            initial: Some(self.endpoints.get()),
-            inner: self.endpoints.watch().into_stream(),
+            inner: Box::pin(stream),
         }
     }
 
@@ -315,13 +332,17 @@ impl MagicSock {
     /// Note that this can be used to wait for the initial home relay to be known. If the home
     /// relay is known at this point, it will be the first item in the stream.
     pub fn watch_home_relay(&self) -> impl Stream<Item = RelayUrl> {
-        let current = futures_lite::stream::iter(self.my_relay());
-        let changes = self
-            .my_relay
-            .watch()
-            .into_stream()
-            .filter_map(|maybe_relay| maybe_relay);
-        current.chain(changes)
+        let receiver = self.my_relay.1.clone();
+        let current = receiver.borrow().clone();
+
+        futures_lite::stream::unfold(current, move |last| {
+            let mut receiver = receiver.clone();
+            async move {
+                let next: Option<RelayUrl> = receiver.recv().await.ok()?;
+                Some((last, next))
+            }
+        })
+        .filter_map(|val| val)
     }
 
     /// Returns a stream that reports the [`ConnectionType`] we have to the
@@ -1107,7 +1128,7 @@ impl MagicSock {
     }
 
     fn send_queued_call_me_maybes(&self) {
-        let msg = self.endpoints.read().to_call_me_maybe_message();
+        let msg = self.endpoints.1.borrow().to_call_me_maybe_message();
         let msg = disco::Message::CallMeMaybe(msg);
         for (public_key, url) in self.pending_call_me_maybes.lock().drain() {
             if !self.send_disco_message_relay(&url, public_key, msg.clone()) {
@@ -1117,7 +1138,7 @@ impl MagicSock {
     }
 
     fn send_or_queue_call_me_maybe(&self, url: &RelayUrl, dst_key: PublicKey) {
-        let endpoints = self.endpoints.read();
+        let endpoints = self.endpoints.1.borrow();
         if endpoints.fresh_enough() {
             let msg = endpoints.to_call_me_maybe_message();
             let msg = disco::Message::CallMeMaybe(msg);
@@ -1152,8 +1173,8 @@ impl MagicSock {
     /// Called whenever our addresses or home relay node changes.
     fn publish_my_addr(&self) {
         if let Some(ref discovery) = self.discovery {
-            let eps = self.endpoints.read();
             let relay_url = self.my_relay();
+            let eps = self.endpoints.1.borrow();
             let direct_addresses = eps.iter().map(|ep| ep.addr).collect();
             let info = AddrInfo {
                 relay_url,
@@ -1350,7 +1371,7 @@ impl Handle {
             actor_sender: actor_sender.clone(),
             ipv6_reported: Arc::new(AtomicBool::new(false)),
             relay_map,
-            my_relay: Default::default(),
+            my_relay: just_watch::channel(None),
             pconn4: pconn4.clone(),
             pconn6: pconn6.clone(),
             net_checker: net_checker.clone(),
@@ -1361,7 +1382,7 @@ impl Handle {
             send_buffer: Default::default(),
             udp_disco_sender,
             discovery,
-            endpoints: Watchable::new(Default::default()),
+            endpoints: just_watch::channel(Default::default()),
             pending_call_me_maybes: Default::default(),
             endpoints_update_state: EndpointUpdateState::new(),
             dns_resolver,
@@ -1439,7 +1460,6 @@ impl Handle {
         self.msock.closing.store(true, Ordering::Relaxed);
         self.msock.actor_sender.send(ActorMessage::Shutdown).await?;
         self.msock.closed.store(true, Ordering::SeqCst);
-        self.msock.endpoints.shutdown();
 
         let mut tasks = self.actor_tasks.lock().await;
 
@@ -1466,10 +1486,10 @@ impl Handle {
 }
 
 /// Stream returning local endpoints as they change.
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 pub struct LocalEndpointsStream {
-    initial: Option<DiscoveredEndpoints>,
-    inner: watchable::WatcherStream<DiscoveredEndpoints>,
+    #[debug("endpoint stream")]
+    inner: Pin<Box<dyn Stream<Item = DiscoveredEndpoints> + Send + Sync>>,
 }
 
 impl Stream for LocalEndpointsStream {
@@ -1477,11 +1497,6 @@ impl Stream for LocalEndpointsStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = &mut *self;
-        if let Some(initial_endpoints) = this.initial.take() {
-            if !initial_endpoints.is_empty() {
-                return Poll::Ready(Some(initial_endpoints.into_iter().collect()));
-            }
-        }
         loop {
             match Pin::new(&mut this.inner).poll_next(cx) {
                 Poll::Pending => break Poll::Pending,
@@ -2070,10 +2085,11 @@ impl Actor {
         let updated = self
             .msock
             .endpoints
-            .update(DiscoveredEndpoints::new(eps))
+            .0
+            .send(DiscoveredEndpoints::new(eps))
             .is_ok();
         if updated {
-            let eps = self.msock.endpoints.read();
+            let eps = self.msock.endpoints.1.borrow();
             eps.log_endpoint_change();
             self.msock.publish_my_addr();
         }
@@ -3340,7 +3356,8 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let msock = MagicSock::spawn(ops).await.unwrap();
-        let mut relay_stream = msock.watch_home_relay();
+        let relay_stream = msock.watch_home_relay();
+        tokio::pin!(relay_stream);
 
         // no relay, nothing to report
         assert_eq!(
@@ -3355,7 +3372,8 @@ pub(crate) mod tests {
 
         // drop the stream and query it again, the result should be immediately available
 
-        let mut relay_stream = msock.watch_home_relay();
+        let relay_stream = msock.watch_home_relay();
+        tokio::pin!(relay_stream);
         assert_eq!(
             futures_lite::future::poll_once(relay_stream.next()).await,
             Some(Some(url))
