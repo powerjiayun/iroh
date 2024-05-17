@@ -190,9 +190,16 @@ impl NodeState {
     pub(super) fn conn_type_stream(&self) -> impl Stream<Item = ConnectionType> {
         let receiver = self.conn_type.1.clone();
         let seed = receiver.borrow().clone();
-        futures_lite::stream::unfold(seed, move |n| {
+        futures_lite::stream::unfold(Some(seed), move |mut last| {
             let mut receiver = receiver.clone();
-            async move { receiver.recv().await.ok().map(|val| (n, val)) }
+            async move {
+                if let Some(val) = last.take() {
+                    return Some((val, last));
+                }
+
+                let next = receiver.recv().await.ok()?;
+                Some((next, last))
+            }
         })
     }
 

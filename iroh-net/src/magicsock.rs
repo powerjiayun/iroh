@@ -314,11 +314,14 @@ impl MagicSock {
         let receiver = self.endpoints.1.clone();
         let seed = receiver.borrow().clone();
 
-        let stream = futures_lite::stream::unfold(seed, move |last| {
+        let stream = futures_lite::stream::unfold(Some(seed), move |mut last| {
             let mut receiver = receiver.clone();
             async move {
+                if let Some(next) = last.take() {
+                    return Some((next, last));
+                }
                 let next = receiver.recv().await.ok()?;
-                Some((last, next))
+                Some((next, last))
             }
         });
 
@@ -335,11 +338,14 @@ impl MagicSock {
         let receiver = self.my_relay.1.clone();
         let current = receiver.borrow().clone();
 
-        futures_lite::stream::unfold(current, move |last| {
+        futures_lite::stream::unfold(current, move |mut last| {
             let mut receiver = receiver.clone();
             async move {
+                if let Some(val) = last.take() {
+                    return Some((Some(val), last));
+                }
                 let next: Option<RelayUrl> = receiver.recv().await.ok()?;
-                Some((last, next))
+                Some((next, last))
             }
         })
         .filter_map(|val| val)
