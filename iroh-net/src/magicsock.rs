@@ -57,7 +57,9 @@ use crate::{
     net::{interfaces, ip::LocalAddresses, netmon, IpFamily},
     netcheck, portmapper,
     relay::{RelayMap, RelayUrl},
-    stun, AddrInfo,
+    stun,
+    util::watchable::{Watchable, Watcher},
+    AddrInfo,
 };
 
 use self::{
@@ -197,10 +199,7 @@ pub(super) struct MagicSock {
     /// None (or zero nodes) means relay is disabled.
     relay_map: RelayMap,
     /// Nearest relay node ID; 0 means none/unknown.
-    my_relay: (
-        just_watch::Sender<Option<RelayUrl>>,
-        just_watch::Receiver<Option<RelayUrl>>,
-    ),
+    my_relay: Watchable<Option<RelayUrl>>,
     /// Tracks the networkmap node entity for each node discovery key.
     node_map: NodeMap,
     /// UDP IPv4 socket
@@ -222,10 +221,7 @@ pub(super) struct MagicSock {
     discovery: Option<Box<dyn Discovery>>,
 
     /// Our discovered endpoints
-    endpoints: (
-        just_watch::Sender<DiscoveredEndpoints>,
-        just_watch::Receiver<DiscoveredEndpoints>,
-    ),
+    endpoints: Watchable<DiscoveredEndpoints>,
 
     /// List of CallMeMaybe disco messages that should be sent out after the next endpoint update
     /// completes
@@ -251,16 +247,14 @@ impl MagicSock {
     ///
     /// If `None`, then we are not connected to any relay nodes.
     pub fn my_relay(&self) -> Option<RelayUrl> {
-        self.my_relay.1.borrow().clone()
+        self.my_relay.get().clone()
     }
 
     /// Sets the relay node with the best latency.
     ///
     /// If we are not connected to any relay nodes, set this to `None`.
     fn set_my_relay(&self, my_relay: Option<RelayUrl>) -> Option<RelayUrl> {
-        let current = self.my_relay();
-        self.my_relay.0.send(my_relay).ok();
-        current
+        self.my_relay.set(my_relay).flatten()
     }
 
     fn is_closing(&self) -> bool {
@@ -311,22 +305,8 @@ impl MagicSock {
     ///
     /// To get the current endpoints, drop the stream after the first item was received.
     pub fn local_endpoints(&self) -> LocalEndpointsStream {
-        let receiver = self.endpoints.1.clone();
-        let seed = receiver.borrow().clone();
-
-        let stream = futures_lite::stream::unfold(Some(seed), move |mut last| {
-            let mut receiver = receiver.clone();
-            async move {
-                if let Some(next) = last.take() {
-                    return Some((next, last));
-                }
-                let next = receiver.recv().await.ok()?;
-                Some((next, last))
-            }
-        });
-
         LocalEndpointsStream {
-            inner: Box::pin(stream),
+            inner: self.endpoints.watch_initial(),
         }
     }
 
@@ -335,20 +315,7 @@ impl MagicSock {
     /// Note that this can be used to wait for the initial home relay to be known. If the home
     /// relay is known at this point, it will be the first item in the stream.
     pub fn watch_home_relay(&self) -> impl Stream<Item = RelayUrl> {
-        let receiver = self.my_relay.1.clone();
-        let current = receiver.borrow().clone();
-
-        futures_lite::stream::unfold(current, move |mut last| {
-            let mut receiver = receiver.clone();
-            async move {
-                if let Some(val) = last.take() {
-                    return Some((Some(val), last));
-                }
-                let next: Option<RelayUrl> = receiver.recv().await.ok()?;
-                Some((next, last))
-            }
-        })
-        .filter_map(|val| val)
+        self.my_relay.watch_initial().filter_map(|val| val)
     }
 
     /// Returns a stream that reports the [`ConnectionType`] we have to the
@@ -1134,7 +1101,7 @@ impl MagicSock {
     }
 
     fn send_queued_call_me_maybes(&self) {
-        let msg = self.endpoints.1.borrow().to_call_me_maybe_message();
+        let msg = self.endpoints.get().to_call_me_maybe_message();
         let msg = disco::Message::CallMeMaybe(msg);
         for (public_key, url) in self.pending_call_me_maybes.lock().drain() {
             if !self.send_disco_message_relay(&url, public_key, msg.clone()) {
@@ -1144,7 +1111,7 @@ impl MagicSock {
     }
 
     fn send_or_queue_call_me_maybe(&self, url: &RelayUrl, dst_key: PublicKey) {
-        let endpoints = self.endpoints.1.borrow();
+        let endpoints = self.endpoints.get();
         if endpoints.fresh_enough() {
             let msg = endpoints.to_call_me_maybe_message();
             let msg = disco::Message::CallMeMaybe(msg);
@@ -1180,7 +1147,7 @@ impl MagicSock {
     fn publish_my_addr(&self) {
         if let Some(ref discovery) = self.discovery {
             let relay_url = self.my_relay();
-            let eps = self.endpoints.1.borrow();
+            let eps = self.endpoints.get();
             let direct_addresses = eps.iter().map(|ep| ep.addr).collect();
             let info = AddrInfo {
                 relay_url,
@@ -1377,7 +1344,7 @@ impl Handle {
             actor_sender: actor_sender.clone(),
             ipv6_reported: Arc::new(AtomicBool::new(false)),
             relay_map,
-            my_relay: just_watch::channel(None),
+            my_relay: Watchable::new(None),
             pconn4: pconn4.clone(),
             pconn6: pconn6.clone(),
             net_checker: net_checker.clone(),
@@ -1388,7 +1355,7 @@ impl Handle {
             send_buffer: Default::default(),
             udp_disco_sender,
             discovery,
-            endpoints: just_watch::channel(Default::default()),
+            endpoints: Watchable::default(),
             pending_call_me_maybes: Default::default(),
             endpoints_update_state: EndpointUpdateState::new(),
             dns_resolver,
@@ -1494,8 +1461,7 @@ impl Handle {
 /// Stream returning local endpoints as they change.
 #[derive(derive_more::Debug)]
 pub struct LocalEndpointsStream {
-    #[debug("endpoint stream")]
-    inner: Pin<Box<dyn Stream<Item = DiscoveredEndpoints> + Send + Sync>>,
+    inner: Watcher<DiscoveredEndpoints>,
 }
 
 impl Stream for LocalEndpointsStream {
@@ -2091,11 +2057,10 @@ impl Actor {
         let updated = self
             .msock
             .endpoints
-            .0
-            .send(DiscoveredEndpoints::new(eps))
-            .is_ok();
+            .set(DiscoveredEndpoints::new(eps))
+            .is_some();
         if updated {
-            let eps = self.msock.endpoints.1.borrow();
+            let eps = self.msock.endpoints.get();
             eps.log_endpoint_change();
             self.msock.publish_my_addr();
         }
@@ -2393,7 +2358,7 @@ fn bind(port: u16) -> Result<(UdpConn, Option<UdpConn>)> {
     Ok((pconn4, pconn6))
 }
 
-#[derive(derive_more::Debug, Default, Clone)]
+#[derive(derive_more::Debug, Default, Clone, Eq)]
 struct DiscoveredEndpoints {
     /// Records the endpoints found during the previous
     /// endpoint discovery. It's used to avoid duplicate endpoint change notifications.

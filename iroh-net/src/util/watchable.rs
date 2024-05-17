@@ -20,14 +20,24 @@ struct Shared<T> {
     watchers: RwLock<VecDeque<Waker>>,
 }
 
+impl<T: Default> Default for Shared<T> {
+    fn default() -> Self {
+        Shared {
+            value: Default::default(),
+            epoch: INITIAL_EPOCH.into(),
+            watchers: Default::default(),
+        }
+    }
+}
+
 /// A value, whos changes can be observed.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Watchable<T> {
     shared: Arc<Shared<T>>,
 }
 
 /// The watcher watching the watchable.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Watcher<T> {
     last_epoch: u64,
     shared: Arc<Shared<T>>,
@@ -52,7 +62,7 @@ impl<T: Clone + Eq> Watchable<T> {
     ///
     /// If the value changed, returns the old value, otherwise `None`.
     /// Watchers are only notified if the value is changed.
-    pub fn set(&mut self, value: T) -> Option<T> {
+    pub fn set(&self, value: T) -> Option<T> {
         if value == *self.shared.value.read().unwrap() {
             return None;
         }
@@ -75,12 +85,21 @@ impl<T: Clone + Eq> Watchable<T> {
     /// Creates a watcher, that will yield the initial value immediately
     /// and then new values.
     pub fn watch_initial(&self) -> Watcher<T> {
+        let last_epoch = self.shared.epoch.load(Ordering::SeqCst);
+        debug_assert!(last_epoch > 0);
         Watcher {
-            last_epoch: self.shared.epoch.load(Ordering::SeqCst) - 1,
+            last_epoch: last_epoch - 1,
             shared: Arc::clone(&self.shared),
         }
     }
 
+    /// Returns a reference to the currently held value.
+    pub fn get(&self) -> RwLockReadGuard<'_, T> {
+        self.shared.value.read().unwrap()
+    }
+}
+
+impl<T> Watcher<T> {
     /// Returns a reference to the currently held value.
     pub fn get(&self) -> RwLockReadGuard<'_, T> {
         self.shared.value.read().unwrap()
@@ -128,7 +147,7 @@ mod tests {
     #[tokio::test]
     async fn test_watcher() {
         let cancel = CancellationToken::new();
-        let mut watchable = Watchable::new(17);
+        let watchable = Watchable::new(17);
 
         assert_eq!(watchable.watch_initial().next().await.unwrap(), 17);
 

@@ -5,7 +5,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures_lite::Stream;
 use iroh_metrics::inc;
 use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
@@ -20,7 +19,10 @@ use crate::{
     net::ip::is_unicast_link_local,
     relay::RelayUrl,
     stun,
-    util::relay_only_mode,
+    util::{
+        relay_only_mode,
+        watchable::{Watchable, Watcher},
+    },
     NodeAddr, NodeId,
 };
 
@@ -137,10 +139,7 @@ pub(super) struct NodeState {
     /// call-me-maybe messages as backup.
     last_call_me_maybe: Option<Instant>,
     /// The type of connection we have to the node, either direct, relay, mixed, or none.
-    conn_type: (
-        just_watch::Sender<ConnectionType>,
-        just_watch::Receiver<ConnectionType>,
-    ),
+    conn_type: Watchable<ConnectionType>,
 }
 
 #[derive(Debug)]
@@ -171,7 +170,7 @@ impl NodeState {
             direct_addr_state: BTreeMap::new(),
             last_used: options.active.then(Instant::now),
             last_call_me_maybe: None,
-            conn_type: just_watch::channel(ConnectionType::None),
+            conn_type: Watchable::new(ConnectionType::None),
         }
     }
 
@@ -187,25 +186,13 @@ impl NodeState {
         self.id
     }
 
-    pub(super) fn conn_type_stream(&self) -> impl Stream<Item = ConnectionType> {
-        let receiver = self.conn_type.1.clone();
-        let seed = receiver.borrow().clone();
-        futures_lite::stream::unfold(Some(seed), move |mut last| {
-            let mut receiver = receiver.clone();
-            async move {
-                if let Some(val) = last.take() {
-                    return Some((val, last));
-                }
-
-                let next = receiver.recv().await.ok()?;
-                Some((next, last))
-            }
-        })
+    pub(super) fn conn_type_stream(&self) -> Watcher<ConnectionType> {
+        self.conn_type.watch_initial()
     }
 
     /// Returns info about this endpoint
     pub(super) fn info(&self, now: Instant) -> NodeInfo {
-        let conn_type = self.conn_type.1.borrow().clone();
+        let conn_type = self.conn_type.get().clone();
         let latency = match conn_type {
             ConnectionType::Direct(addr) => self
                 .direct_addr_state
@@ -313,8 +300,9 @@ impl NodeState {
             (None, Some(relay_url)) => ConnectionType::Relay(relay_url),
             (None, None) => ConnectionType::None,
         };
-        self.conn_type.0.send(typ.clone()).ok();
-        info!(%typ, "new connection type");
+        if self.conn_type.set(typ.clone()).is_some() {
+            info!(%typ, "new connection type");
+        }
 
         (best_addr, relay_url)
     }
@@ -1536,7 +1524,7 @@ mod tests {
                     sent_pings: HashMap::new(),
                     last_used: Some(now),
                     last_call_me_maybe: None,
-                    conn_type: just_watch::channel(ConnectionType::Direct(ip_port.into())),
+                    conn_type: Watchable::new(ConnectionType::Direct(ip_port.into())),
                 },
                 ip_port.into(),
             )
@@ -1556,7 +1544,7 @@ mod tests {
                 sent_pings: HashMap::new(),
                 last_used: Some(now),
                 last_call_me_maybe: None,
-                conn_type: just_watch::channel(ConnectionType::Relay(send_addr.clone())),
+                conn_type: Watchable::new(ConnectionType::Relay(send_addr.clone())),
             }
         };
 
@@ -1576,7 +1564,7 @@ mod tests {
                 sent_pings: HashMap::new(),
                 last_used: Some(now),
                 last_call_me_maybe: None,
-                conn_type: just_watch::channel(ConnectionType::Relay(send_addr.clone())),
+                conn_type: Watchable::new(ConnectionType::Relay(send_addr.clone())),
             }
         };
 
@@ -1611,7 +1599,7 @@ mod tests {
                     sent_pings: HashMap::new(),
                     last_used: Some(now),
                     last_call_me_maybe: None,
-                    conn_type: just_watch::channel(ConnectionType::Mixed(
+                    conn_type: Watchable::new(ConnectionType::Mixed(
                         socket_addr,
                         send_addr.clone(),
                     )),
