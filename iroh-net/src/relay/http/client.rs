@@ -22,6 +22,7 @@ use tokio::time::Instant;
 use tracing::{debug, error, info_span, trace, warn, Instrument};
 use url::Url;
 
+#[cfg(feature = "native")]
 use crate::dns::{DnsResolver, ResolverExt};
 use crate::key::{PublicKey, SecretKey};
 use crate::relay::RelayUrl;
@@ -158,6 +159,7 @@ struct Actor {
     tls_connector: tokio_rustls::TlsConnector,
     pings: PingTracker,
     ping_tasks: JoinSet<()>,
+    #[cfg(feature = "native")]
     dns_resolver: DnsResolver,
 }
 
@@ -276,7 +278,11 @@ impl ClientBuilder {
     }
 
     /// Build the [`Client`]
-    pub fn build(self, key: SecretKey, dns_resolver: DnsResolver) -> (Client, ClientReceiver) {
+    pub fn build(
+        self,
+        key: SecretKey,
+        #[cfg(feature = "native")] dns_resolver: DnsResolver,
+    ) -> (Client, ClientReceiver) {
         // TODO: review TLS config
         let mut roots = rustls::RootCertStore::empty();
         roots.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| {
@@ -315,6 +321,7 @@ impl ClientBuilder {
             ping_tasks: Default::default(),
             url: self.url,
             tls_connector,
+            #[cfg(feature = "native")]
             dns_resolver,
         };
 
@@ -782,6 +789,16 @@ impl Actor {
         true
     }
 
+    #[cfg(not(feature = "native"))]
+    async fn dial_url(&self) -> Result<TcpStream, ClientError> {
+        debug!(%self.url, "dial url");
+
+        // use wasm things
+
+        todo!()
+    }
+
+    #[cfg(feature = "native")]
     async fn dial_url(&self) -> Result<TcpStream, ClientError> {
         debug!(%self.url, "dial url");
 
@@ -851,6 +868,7 @@ impl Actor {
     }
 }
 
+#[cfg(feature = "native")]
 async fn resolve_host(
     resolver: &DnsResolver,
     url: &Url,
@@ -933,7 +951,7 @@ impl rustls::client::ServerCertVerifier for NoCertVerifier {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use anyhow::Result;
 

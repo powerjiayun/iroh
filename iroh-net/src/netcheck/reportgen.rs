@@ -32,16 +32,23 @@ use tracing::{debug, debug_span, error, info_span, trace, warn, Instrument, Span
 
 use super::NetcheckMetrics;
 use crate::defaults::DEFAULT_RELAY_STUN_PORT;
+#[cfg(feature = "native")]
 use crate::dns::{DnsResolver, ResolverExt};
+#[cfg(feature = "native")]
 use crate::net::interfaces;
 use crate::net::ip;
+#[cfg(feature = "native")]
 use crate::net::UdpSocket;
 use crate::netcheck::{self, Report};
+#[cfg(feature = "native")]
 use crate::ping::{PingError, Pinger};
+#[cfg(feature = "native")]
+use crate::portmapper;
 use crate::relay::{RelayMap, RelayNode, RelayUrl};
+use crate::stun;
 use crate::util::{CancelOnDrop, MaybeFuture};
-use crate::{portmapper, stun};
 
+#[cfg(feature = "native")]
 mod hairpin;
 mod probes;
 
@@ -90,11 +97,11 @@ impl Client {
     pub(super) fn new(
         netcheck: netcheck::Addr,
         last_report: Option<Arc<Report>>,
-        port_mapper: Option<portmapper::Client>,
+        #[cfg(feature = "native")] port_mapper: Option<portmapper::Client>,
         relay_map: RelayMap,
-        stun_sock4: Option<Arc<UdpSocket>>,
-        stun_sock6: Option<Arc<UdpSocket>>,
-        dns_resolver: DnsResolver,
+        #[cfg(feature = "native")] stun_sock4: Option<Arc<UdpSocket>>,
+        #[cfg(feature = "native")] stun_sock6: Option<Arc<UdpSocket>>,
+        #[cfg(feature = "native")] dns_resolver: DnsResolver,
     ) -> Self {
         let (msg_tx, msg_rx) = mpsc::channel(32);
         let addr = Addr {
@@ -105,13 +112,18 @@ impl Client {
             msg_rx,
             netcheck: netcheck.clone(),
             last_report,
+            #[cfg(feature = "native")]
             port_mapper,
             relay_map,
+            #[cfg(feature = "native")]
             stun_sock4,
+            #[cfg(feature = "native")]
             stun_sock6,
             report: Report::default(),
+            #[cfg(feature = "native")]
             hairpin_actor: hairpin::Client::new(netcheck, addr),
             outstanding_tasks: OutstandingTasks::default(),
+            #[cfg(feature = "native")]
             dns_resolver,
         };
         let task = tokio::spawn(
@@ -175,24 +187,29 @@ struct Actor {
     /// The previous report, if it exists.
     last_report: Option<Arc<Report>>,
     /// The portmapper client, if there is one.
+    #[cfg(feature = "native")]
     port_mapper: Option<portmapper::Client>,
     /// The relay configuration.
     relay_map: RelayMap,
     /// Socket to send IPv4 STUN requests from.
+    #[cfg(feature = "native")]
     stun_sock4: Option<Arc<UdpSocket>>,
     /// Socket so send IPv6 STUN requests from.
+    #[cfg(feature = "native")]
     stun_sock6: Option<Arc<UdpSocket>>,
 
     // Internal state.
     /// The report being built.
     report: Report,
     /// The hairping actor.
+    #[cfg(feature = "native")]
     hairpin_actor: hairpin::Client,
     /// Which tasks the [`Actor`] is still waiting on.
     ///
     /// This is essentially the summary of all the work the [`Actor`] is doing.
     outstanding_tasks: OutstandingTasks,
     /// The DNS resolver to use for probes that need to resolve DNS records
+    #[cfg(feature = "native")]
     dns_resolver: DnsResolver,
 }
 
@@ -229,6 +246,7 @@ impl Actor {
     ///   - Updates the report, cancels unneeded futures.
     /// - Sends the report to the netcheck actor.
     async fn run_inner(&mut self) -> Result<()> {
+        #[cfg(feature = "native")]
         debug!(
             port_mapper = %self.port_mapper.is_some(),
             "reportstate actor starting",
@@ -236,6 +254,7 @@ impl Actor {
 
         self.report.os_has_ipv6 = super::os_has_ipv6();
 
+        #[cfg(feature = "native")]
         let mut port_mapping = self.prepare_portmapper_task();
         let mut captive_task = self.prepare_captive_portal_task();
         let mut probes = self.spawn_probes_task().await?;
@@ -251,6 +270,7 @@ impl Actor {
                 debug!("all tasks done");
                 break;
             }
+            #[cfg(feature = "native")]
             tokio::select! {
                 biased;
                 _ = &mut total_timer => {
@@ -270,6 +290,53 @@ impl Actor {
                     self.report.portmap_probe = pm;
                     port_mapping.inner = None;
                     self.outstanding_tasks.port_mapper = false;
+                }
+
+                // Check for probes finishing.
+                set_result = probes.join_next(), if self.outstanding_tasks.probes => {
+                    trace!("tick: probes done: {:?}", set_result);
+                    match set_result {
+                        Some(Ok(Ok(report))) => self.handle_probe_report(report),
+                        Some(Ok(Err(_))) => (),
+                        Some(Err(e)) => {
+                            warn!("probes task error: {:?}", e);
+                        }
+                        None => {
+                            self.handle_abort_probes();
+                        }
+                    }
+                    trace!("tick: probes handled");
+                }
+
+                // Drive the captive task.
+                found = &mut captive_task, if self.outstanding_tasks.captive_task => {
+                    trace!("tick: captive portal task done");
+                    self.report.captive_portal = found;
+                    captive_task.inner = None;
+                    self.outstanding_tasks.captive_task = false;
+                }
+
+                // Handle actor messages.
+                msg = self.msg_rx.recv() => {
+                    trace!("tick: msg recv: {:?}", msg);
+                    match msg {
+                        Some(msg) => self.handle_message(msg),
+                        None => bail!("msg_rx closed, reportgen client must be dropped"),
+                    }
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            tokio::select! {
+                biased;
+                _ = &mut total_timer => {
+                    trace!("tick: total_timer expired");
+                    bail!("report timed out");
+                }
+
+                _ = &mut probe_timer => {
+                    warn!("tick: probes timed out");
+                    probes.abort_all();
+                    self.handle_abort_probes();
                 }
 
                 // Check for probes finishing.
@@ -353,6 +420,7 @@ impl Actor {
 
         // When we discover the first IPv4 address we want to start the hairpin actor.
         if let Some(ref addr) = self.report.global_v4 {
+            #[cfg(feature = "native")]
             if !self.hairpin_actor.has_started() {
                 self.hairpin_actor.start_check(*addr);
                 self.outstanding_tasks.hairpin = true;
@@ -436,6 +504,7 @@ impl Actor {
     /// Creates the future which will perform the portmapper task.
     ///
     /// The returned future will run the portmapper, if enabled, resolving to it's result.
+    #[cfg(feature = "native")]
     fn prepare_portmapper_task(
         &mut self,
     ) -> MaybeFuture<Pin<Box<impl Future<Output = Option<portmapper::ProbeOutput>>>>> {
@@ -530,17 +599,26 @@ impl Actor {
     ///   - Once there are [`ProbeReport`]s from enough nodes, all remaining probes are
     ///     aborted.  That is, the main actor loop stops polling them.
     async fn spawn_probes_task(&mut self) -> Result<JoinSet<Result<ProbeReport>>> {
-        let if_state = interfaces::State::new().await;
-        debug!(%if_state, "Local interfaces");
+        #[cfg(feature = "native")]
+        let plan = {
+            let if_state = interfaces::State::new().await;
+            debug!(%if_state, "Local interfaces");
+            match self.last_report {
+                Some(ref report) => ProbePlan::with_last_report(&self.relay_map, &if_state, report),
+                None => ProbePlan::initial(&self.relay_map, &if_state),
+            }
+        };
+        #[cfg(not(feature = "native"))]
         let plan = match self.last_report {
-            Some(ref report) => ProbePlan::with_last_report(&self.relay_map, &if_state, report),
-            None => ProbePlan::initial(&self.relay_map, &if_state),
+            Some(ref report) => ProbePlan::with_last_report(&self.relay_map, report),
+            None => ProbePlan::initial(&self.relay_map),
         };
         trace!(%plan, "probe plan");
 
         // The pinger is created here so that any sockets that might be bound for it are
         // shared between the probes that use it.  It binds sockets lazily, so we can always
         // create it.
+        #[cfg(feature = "native")]
         let pinger = Pinger::new();
 
         // A collection of futures running probe sets.
@@ -549,23 +627,31 @@ impl Actor {
             let mut set = JoinSet::default();
             for probe in probe_set {
                 let reportstate = self.addr();
+                #[cfg(feature = "native")]
                 let stun_sock4 = self.stun_sock4.clone();
+                #[cfg(feature = "native")]
                 let stun_sock6 = self.stun_sock6.clone();
                 let relay_node = probe.node().clone();
                 let probe = probe.clone();
                 let netcheck = self.netcheck.clone();
+                #[cfg(feature = "native")]
                 let pinger = pinger.clone();
+                #[cfg(feature = "native")]
                 let dns_resolver = self.dns_resolver.clone();
 
                 set.spawn(
                     run_probe(
                         reportstate,
+                        #[cfg(feature = "native")]
                         stun_sock4,
+                        #[cfg(feature = "native")]
                         stun_sock6,
                         relay_node,
                         probe.clone(),
                         netcheck,
+                        #[cfg(feature = "native")]
                         pinger,
+                        #[cfg(feature = "native")]
                         dns_resolver,
                     )
                     .instrument(debug_span!("run_probe", %probe)),
@@ -678,13 +764,13 @@ enum ProbeError {
 #[allow(clippy::too_many_arguments)]
 async fn run_probe(
     reportstate: Addr,
-    stun_sock4: Option<Arc<UdpSocket>>,
-    stun_sock6: Option<Arc<UdpSocket>>,
+    #[cfg(feature = "native")] stun_sock4: Option<Arc<UdpSocket>>,
+    #[cfg(feature = "native")] stun_sock6: Option<Arc<UdpSocket>>,
     relay_node: Arc<RelayNode>,
     probe: Probe,
     netcheck: netcheck::Addr,
-    pinger: Pinger,
-    dns_resolver: DnsResolver,
+    #[cfg(feature = "native")] pinger: Pinger,
+    #[cfg(feature = "native")] dns_resolver: DnsResolver,
 ) -> Result<ProbeReport, ProbeError> {
     if !probe.delay().is_zero() {
         trace!("delaying probe");
@@ -718,6 +804,7 @@ async fn run_probe(
         ));
     }
 
+    #[cfg(feature = "native")]
     let relay_addr = get_relay_addr(&dns_resolver, &relay_node, probe.proto())
         .await
         .context("no relay node addr")
@@ -725,6 +812,7 @@ async fn run_probe(
 
     let mut result = ProbeReport::new(probe.clone());
     match probe {
+        #[cfg(feature = "native")]
         Probe::StunIpv4 { .. } | Probe::StunIpv6 { .. } => {
             let maybe_sock = if matches!(probe, Probe::StunIpv4 { .. }) {
                 stun_sock4.as_ref()
@@ -743,6 +831,7 @@ async fn run_probe(
                 }
             }
         }
+        #[cfg(feature = "native")]
         Probe::IcmpV4 { .. } | Probe::IcmpV6 { .. } => {
             result = run_icmp_probe(probe, relay_addr, pinger).await?
         }
@@ -773,6 +862,7 @@ async fn run_probe(
 }
 
 /// Run a STUN IPv4 or IPv6 probe.
+#[cfg(feature = "native")]
 async fn run_stun_probe(
     sock: &Arc<UdpSocket>,
     relay_addr: SocketAddr,
@@ -926,6 +1016,7 @@ async fn check_captive_portal(dm: &RelayMap, preferred_relay: Option<RelayUrl>) 
 /// *proto* specifies the protocol of the probe.  Depending on the protocol we may return
 /// different results.  Obviously IPv4 vs IPv6 but a [`RelayNode`] may also have disabled
 /// some protocols.
+#[cfg(feature = "native")]
 async fn get_relay_addr(
     dns_resolver: &DnsResolver,
     relay_node: &RelayNode,
@@ -984,6 +1075,7 @@ async fn get_relay_addr(
 ///
 /// The `pinger` is passed in so the ping sockets are only bound once
 /// for the probe set.
+#[cfg(feature = "native")]
 async fn run_icmp_probe(
     probe: Probe,
     relay_addr: SocketAddr,
@@ -1113,7 +1205,7 @@ fn update_report(report: &mut Report, probe_report: ProbeReport) {
         .or(probe_report.icmpv6);
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
 

@@ -20,6 +20,7 @@ use tokio::sync::oneshot;
 use tokio::time::Instant;
 use tracing::{debug, error, info_span, trace, warn, Instrument};
 
+#[cfg(feature = "native")]
 use crate::net::UdpSocket;
 use crate::netcheck::{self, reportgen, Inflight};
 use crate::stun;

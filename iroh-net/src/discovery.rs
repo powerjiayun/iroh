@@ -10,7 +10,9 @@ use tracing::{debug, error_span, warn, Instrument};
 
 use crate::{AddrInfo, Endpoint, NodeId};
 
+#[cfg(feature = "native")]
 pub mod dns;
+#[cfg(feature = "native")]
 pub mod pkarr_publish;
 
 /// Node discovery for [`super::Endpoint`].
@@ -553,7 +555,7 @@ mod tests {
 ///
 /// The tests run a minimal test DNS server to resolve against, and a minimal pkarr relay to
 /// publish to. The DNS and pkarr servers share their state.
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod test_dns_pkarr {
     use std::time::Duration;
 

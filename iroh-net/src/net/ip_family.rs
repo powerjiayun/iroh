@@ -36,6 +36,7 @@ impl IpFamily {
     }
 }
 
+#[cfg(feature = "native")]
 impl From<IpFamily> for socket2::Domain {
     fn from(value: IpFamily) -> Self {
         match value {

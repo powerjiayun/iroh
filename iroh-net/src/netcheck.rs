@@ -19,12 +19,16 @@ use tokio::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info_span, trace, warn, Instrument};
 
+#[cfg(feature = "native")]
 use crate::dns::DnsResolver;
 use crate::net::ip::to_canonical;
-use crate::net::{IpFamily, UdpSocket};
+use crate::net::IpFamily;
+#[cfg(feature = "native")]
+use crate::net::UdpSocket;
 use crate::relay::RelayUrl;
 use crate::util::CancelOnDrop;
 
+#[cfg(feature = "native")]
 use super::portmapper;
 use super::relay::RelayMap;
 use super::stun;
@@ -78,6 +82,7 @@ pub struct Report {
     /// public IP address (on IPv4).
     pub hair_pinning: Option<bool>,
     /// Probe indicating the presence of port mapping protocols on the LAN.
+    #[cfg(feature = "native")]
     pub portmap_probe: Option<portmapper::ProbeOutput>,
     /// `None` for unknown
     pub preferred_relay: Option<RelayUrl>,
@@ -206,8 +211,26 @@ impl Client {
     ///
     /// This starts a connected actor in the background.  Once the client is dropped it will
     /// stop running.
+    #[cfg(feature = "native")]
     pub fn new(port_mapper: Option<portmapper::Client>, dns_resolver: DnsResolver) -> Result<Self> {
         let mut actor = Actor::new(port_mapper, dns_resolver)?;
+        let addr = actor.addr();
+        let task =
+            tokio::spawn(async move { actor.run().await }.instrument(info_span!("netcheck.actor")));
+        let drop_guard = CancelOnDrop::new("netcheck actor", task.abort_handle());
+        Ok(Client {
+            addr,
+            _drop_guard: Arc::new(drop_guard),
+        })
+    }
+
+    /// Creates a new netcheck client.
+    ///
+    /// This starts a connected actor in the background.  Once the client is dropped it will
+    /// stop running.
+    #[cfg(not(feature = "native"))]
+    pub fn new() -> Result<Self> {
+        let mut actor = Actor::new()?;
         let addr = actor.addr();
         let task =
             tokio::spawn(async move { actor.run().await }.instrument(info_span!("netcheck.actor")));
@@ -257,10 +280,13 @@ impl Client {
     pub async fn get_report(
         &mut self,
         dm: RelayMap,
-        stun_conn4: Option<Arc<UdpSocket>>,
-        stun_conn6: Option<Arc<UdpSocket>>,
+        #[cfg(feature = "native")] stun_conn4: Option<Arc<UdpSocket>>,
+        #[cfg(feature = "native")] stun_conn6: Option<Arc<UdpSocket>>,
     ) -> Result<Arc<Report>> {
+        #[cfg(feature = "native")]
         let rx = self.get_report_channel(dm, stun_conn4, stun_conn6).await?;
+        #[cfg(not(feature = "native"))]
+        let rx = self.get_report_channel(dm).await?;
         match rx.await {
             Ok(res) => res,
             Err(_) => Err(anyhow!("channel closed, actor awol")),
@@ -271,8 +297,8 @@ impl Client {
     pub async fn get_report_channel(
         &mut self,
         dm: RelayMap,
-        stun_conn4: Option<Arc<UdpSocket>>,
-        stun_conn6: Option<Arc<UdpSocket>>,
+        #[cfg(feature = "native")] stun_conn4: Option<Arc<UdpSocket>>,
+        #[cfg(feature = "native")] stun_conn6: Option<Arc<UdpSocket>>,
     ) -> Result<oneshot::Receiver<Result<Arc<Report>>>> {
         // TODO: consider if RelayMap should be made to easily clone?  It seems expensive
         // right now.
@@ -280,7 +306,9 @@ impl Client {
         self.addr
             .send(Message::RunCheck {
                 relay_map: dm,
+                #[cfg(feature = "native")]
                 stun_sock_v4: stun_conn4,
+                #[cfg(feature = "native")]
                 stun_sock_v6: stun_conn6,
                 response_tx: tx,
             })
@@ -316,10 +344,12 @@ pub(crate) enum Message {
         /// other packets from in the magicsocket (`MagicSock`).
         ///
         /// If not provided this will attempt to bind a suitable socket itself.
+        #[cfg(feature = "native")]
         stun_sock_v4: Option<Arc<UdpSocket>>,
         /// Socket to send IPv6 STUN probes from.
         ///
         /// Like `stun_sock_v4` but for IPv6.
+        #[cfg(feature = "native")]
         stun_sock_v6: Option<Arc<UdpSocket>>,
         /// Channel to receive the response.
         response_tx: oneshot::Sender<Result<Arc<Report>>>,
@@ -398,6 +428,7 @@ struct Actor {
     ///
     /// The port mapper is responsible for talking to routers via UPnP and the like to try
     /// and open ports.
+    #[cfg(feature = "native")]
     port_mapper: Option<portmapper::Client>,
 
     // Actor state.
@@ -409,6 +440,7 @@ struct Actor {
     current_report_run: Option<ReportRun>,
 
     /// The DNS resolver to use for probes that need to perform DNS lookups
+    #[cfg(feature = "native")]
     dns_resolver: DnsResolver,
 }
 
@@ -417,6 +449,7 @@ impl Actor {
     ///
     /// This does not start the actor, see [`Actor::run`] for this.  You should not
     /// normally create this directly but rather create a [`Client`].
+    #[cfg(feature = "native")]
     fn new(port_mapper: Option<portmapper::Client>, dns_resolver: DnsResolver) -> Result<Self> {
         // TODO: consider an instrumented flume channel so we have metrics.
         let (sender, receiver) = mpsc::channel(32);
@@ -428,6 +461,19 @@ impl Actor {
             in_flight_stun_requests: Default::default(),
             current_report_run: None,
             dns_resolver,
+        })
+    }
+
+    #[cfg(not(feature = "native"))]
+    fn new() -> Result<Self> {
+        // TODO: consider an instrumented flume channel so we have metrics.
+        let (sender, receiver) = mpsc::channel(32);
+        Ok(Self {
+            receiver,
+            sender,
+            reports: Default::default(),
+            in_flight_stun_requests: Default::default(),
+            current_report_run: None,
         })
     }
 
@@ -449,11 +495,16 @@ impl Actor {
             match msg {
                 Message::RunCheck {
                     relay_map,
+                    #[cfg(feature = "native")]
                     stun_sock_v4,
+                    #[cfg(feature = "native")]
                     stun_sock_v6,
                     response_tx,
                 } => {
+                    #[cfg(feature = "native")]
                     self.handle_run_check(relay_map, stun_sock_v4, stun_sock_v6, response_tx);
+                    #[cfg(not(feature = "native"))]
+                    self.handle_run_check(relay_map, response_tx);
                 }
                 Message::ReportReady { report } => {
                     self.handle_report_ready(report);
@@ -479,8 +530,8 @@ impl Actor {
     fn handle_run_check(
         &mut self,
         relay_map: RelayMap,
-        stun_sock_v4: Option<Arc<UdpSocket>>,
-        stun_sock_v6: Option<Arc<UdpSocket>>,
+        #[cfg(feature = "native")] stun_sock_v4: Option<Arc<UdpSocket>>,
+        #[cfg(feature = "native")] stun_sock_v6: Option<Arc<UdpSocket>>,
         response_tx: oneshot::Sender<Result<Arc<Report>>>,
     ) {
         if self.current_report_run.is_some() {
@@ -495,10 +546,12 @@ impl Actor {
         let now = Instant::now();
 
         let cancel_token = CancellationToken::new();
+        #[cfg(feature = "native")]
         let stun_sock_v4 = match stun_sock_v4 {
             Some(sock) => Some(sock),
             None => bind_local_stun_socket(IpFamily::V4, self.addr(), cancel_token.clone()),
         };
+        #[cfg(feature = "native")]
         let stun_sock_v6 = match stun_sock_v6 {
             Some(sock) => Some(sock),
             None => bind_local_stun_socket(IpFamily::V6, self.addr(), cancel_token.clone()),
@@ -525,10 +578,14 @@ impl Actor {
         let actor = reportgen::Client::new(
             self.addr(),
             self.reports.last.clone(),
+            #[cfg(feature = "native")]
             self.port_mapper.clone(),
             relay_map,
+            #[cfg(feature = "native")]
             stun_sock_v4,
+            #[cfg(feature = "native")]
             stun_sock_v6,
+            #[cfg(feature = "native")]
             self.dns_resolver.clone(),
         );
 
@@ -711,6 +768,7 @@ struct ReportRun {
 /// If successful this returns the bound socket and will forward STUN responses to the
 /// provided *actor_addr*.  The *cancel_token* serves to stop the packet forwarding when the
 /// socket is no longer needed.
+#[cfg(feature = "native")]
 fn bind_local_stun_socket(
     network: IpFamily,
     actor_addr: Addr,
@@ -758,6 +816,7 @@ fn bind_local_stun_socket(
 }
 
 /// Receive STUN response from a UDP socket, pass it to the actor.
+#[cfg(feature = "native")]
 async fn recv_stun_once(sock: &UdpSocket, buf: &mut [u8], actor_addr: &Addr) -> Result<()> {
     let (count, mut from_addr) = sock
         .recv_from(buf)
@@ -773,11 +832,17 @@ async fn recv_stun_once(sock: &UdpSocket, buf: &mut [u8], actor_addr: &Addr) -> 
 }
 
 /// Test if IPv6 works at all, or if it's been hard disabled at the OS level.
+#[cfg(feature = "native")]
 pub(crate) fn os_has_ipv6() -> bool {
     UdpSocket::bind_local_v6(0).is_ok()
 }
 
-#[cfg(test)]
+#[cfg(not(feature = "native"))]
+pub(crate) fn os_has_ipv6() -> bool {
+    false
+}
+
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use std::net::Ipv4Addr;
 

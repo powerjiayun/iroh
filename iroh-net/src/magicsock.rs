@@ -51,28 +51,36 @@ use crate::{
     config,
     disco::{self, SendAddr},
     discovery::Discovery,
-    dns::DnsResolver,
     endpoint::NodeAddr,
     key::{PublicKey, SecretKey, SharedSecret},
-    net::{interfaces, ip::LocalAddresses, netmon, IpFamily},
-    netcheck, portmapper,
+    net::IpFamily,
+    netcheck,
     relay::{RelayMap, RelayUrl},
     stun,
     util::watchable::{Watchable, Watcher},
     AddrInfo,
 };
 
+#[cfg(feature = "native")]
+use crate::{
+    dns::DnsResolver,
+    net::{interfaces, ip::LocalAddresses, netmon},
+    portmapper,
+};
+
+#[cfg(feature = "native")]
+use self::udp_conn::UdpConn;
 use self::{
     metrics::Metrics as MagicsockMetrics,
     node_map::{NodeMap, PingAction, PingRole, SendPing},
     relay_actor::{RelayActor, RelayActorMessage, RelayReadResult},
-    udp_conn::UdpConn,
 };
 
 mod metrics;
 mod node_map;
 mod relay_actor;
 mod timer;
+#[cfg(feature = "native")]
 mod udp_conn;
 
 pub use self::metrics::Metrics;
@@ -116,6 +124,7 @@ pub(super) struct Options {
     ///
     /// You can use [`crate::dns::default_resolver`] for a resolver that uses the system's DNS
     /// configuration.
+    #[cfg(feature = "native")]
     pub dns_resolver: DnsResolver,
 
     /// Skip verification of SSL certificates from relay servers
@@ -133,6 +142,7 @@ impl Default for Options {
             relay_map: RelayMap::empty(),
             nodes_path: None,
             discovery: None,
+            #[cfg(feature = "native")]
             dns_resolver: crate::dns::default_resolver().clone(),
             #[cfg(any(test, feature = "test-utils"))]
             insecure_skip_relay_cert_verify: false,
@@ -178,12 +188,14 @@ pub(super) struct MagicSock {
     network_send_wakers: parking_lot::Mutex<Option<Waker>>,
 
     /// The DNS resolver to be used in this magicsock.
+    #[cfg(feature = "native")]
     dns_resolver: DnsResolver,
 
     /// Key for this node.
     secret_key: SecretKey,
 
     /// Cached version of the Ipv4 and Ipv6 addrs of the current connection.
+    #[cfg(feature = "native")]
     local_addrs: std::sync::RwLock<(SocketAddr, Option<SocketAddr>)>,
 
     /// Preferred port from `Options::port`; 0 means auto.
@@ -203,13 +215,16 @@ pub(super) struct MagicSock {
     /// Tracks the networkmap node entity for each node discovery key.
     node_map: NodeMap,
     /// UDP IPv4 socket
+    #[cfg(feature = "native")]
     pconn4: UdpConn,
     /// UDP IPv6 socket
+    #[cfg(feature = "native")]
     pconn6: Option<UdpConn>,
     /// Netcheck client
     net_checker: netcheck::Client,
     /// The state for an active DiscoKey.
     disco_secrets: DiscoSecrets,
+    #[cfg(feature = "native")]
     udp_state: quinn_udp::UdpState,
 
     /// Send buffer used in `poll_send_udp`
@@ -270,6 +285,7 @@ impl MagicSock {
     }
 
     /// Get the cached version of the Ipv4 and Ipv6 addrs of the current connection.
+    #[cfg(feature = "native")]
     pub fn local_addr(&self) -> (SocketAddr, Option<SocketAddr>) {
         *self.local_addrs.read().expect("not poisoned")
     }
@@ -352,6 +368,7 @@ impl MagicSock {
     }
 
     /// Get a reference to the DNS resolver used in this [`MagicSock`].
+    #[cfg(feature = "native")]
     pub fn dns_resolver(&self) -> &DnsResolver {
         &self.dns_resolver
     }
@@ -377,6 +394,7 @@ impl MagicSock {
             .ok();
     }
 
+    #[cfg(feature = "native")]
     fn normalized_local_addr(&self) -> io::Result<SocketAddr> {
         let (v4, v6) = self.local_addr();
         let addr = if let Some(v6) = v6 { v6 } else { v4 };
@@ -473,6 +491,7 @@ impl MagicSock {
                     for t in transmits.iter_mut() {
                         t.destination = addr;
                     }
+                    #[cfg(feature = "native")]
                     match self.poll_send_udp(addr, &transmits, cx) {
                         Poll::Ready(Ok(n)) => {
                             trace!(node = %public_key.fmt_short(), dst = %addr, transmit_count=n, "sent transmits over UDP");
@@ -559,6 +578,7 @@ impl MagicSock {
         }
     }
 
+    #[cfg(feature = "native")]
     fn poll_send_udp(
         &self,
         addr: SocketAddr,
@@ -580,6 +600,7 @@ impl MagicSock {
         Poll::Ready(Ok(n))
     }
 
+    #[cfg(feature = "native")]
     fn conn_for_addr(&self, addr: SocketAddr) -> io::Result<&UdpConn> {
         let sock = match addr {
             SocketAddr::V4(_) => &self.pconn4,
@@ -593,6 +614,7 @@ impl MagicSock {
 
     /// NOTE: Receiving on a [`Self::closed`] socket will return [`Poll::Pending`] indefinitely.
     #[instrument(skip_all, fields(me = %self.me))]
+    #[cfg(feature = "native")]
     fn poll_recv(
         &self,
         cx: &mut Context,
@@ -703,6 +725,23 @@ impl MagicSock {
         }
 
         Poll::Ready(Ok(msgs))
+    }
+
+    #[instrument(skip_all, fields(me = %self.me))]
+    #[cfg(not(feature = "native"))]
+    fn poll_recv(
+        &self,
+        cx: &mut Context,
+        bufs: &mut [io::IoSliceMut<'_>],
+        metas: &mut [quinn_udp::RecvMeta],
+    ) -> Poll<io::Result<usize>> {
+        // FIXME: currently ipv4 load results in ipv6 traffic being ignored
+        debug_assert_eq!(bufs.len(), metas.len(), "non matching bufs & metas");
+        if self.is_closed() {
+            return Poll::Pending;
+        }
+
+        self.poll_recv_relay(cx, bufs, metas)
     }
 
     #[instrument(skip_all, fields(name = %self.me))]
@@ -882,6 +921,7 @@ impl MagicSock {
             node_key: self.public_key(),
         });
         let sent = match dst {
+            #[cfg(feature = "native")]
             SendAddr::Udp(addr) => self
                 .udp_disco_sender
                 .try_send((addr, dst_node, msg))
@@ -932,6 +972,7 @@ impl MagicSock {
         msg: disco::Message,
     ) -> bool {
         match dst {
+            #[cfg(feature = "native")]
             SendAddr::Udp(addr) => self.udp_disco_sender.try_send((addr, dst_key, msg)).is_ok(),
             SendAddr::Relay(ref url) => self.send_disco_message_relay(url, dst_key, msg),
         }
@@ -946,6 +987,7 @@ impl MagicSock {
         cx: &mut Context<'_>,
     ) -> Poll<io::Result<()>> {
         match dst {
+            #[cfg(feature = "native")]
             SendAddr::Udp(addr) => {
                 ready!(self.poll_send_disco_message_udp(addr, dst_key, &msg, cx))?;
             }
@@ -975,6 +1017,7 @@ impl MagicSock {
         }
     }
 
+    #[cfg(feature = "native")]
     async fn send_disco_message_udp(
         &self,
         dst: SocketAddr,
@@ -985,6 +1028,7 @@ impl MagicSock {
             .await
     }
 
+    #[cfg(feature = "native")]
     fn poll_send_disco_message_udp(
         &self,
         dst: SocketAddr,
@@ -1160,13 +1204,18 @@ impl MagicSock {
 
 #[derive(Clone, Debug)]
 enum DiscoMessageSource {
+    #[cfg(feature = "native")]
     Udp(SocketAddr),
-    Relay { url: RelayUrl, key: PublicKey },
+    Relay {
+        url: RelayUrl,
+        key: PublicKey,
+    },
 }
 
 impl Display for DiscoMessageSource {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
+            #[cfg(feature = "native")]
             Self::Udp(addr) => write!(f, "Udp({addr})"),
             Self::Relay { ref url, key } => write!(f, "Relay({url}, {})", key.fmt_short()),
         }
@@ -1176,6 +1225,7 @@ impl Display for DiscoMessageSource {
 impl From<DiscoMessageSource> for SendAddr {
     fn from(value: DiscoMessageSource) -> Self {
         match value {
+            #[cfg(feature = "native")]
             DiscoMessageSource::Udp(addr) => SendAddr::Udp(addr),
             DiscoMessageSource::Relay { url, .. } => SendAddr::Relay(url),
         }
@@ -1185,6 +1235,7 @@ impl From<DiscoMessageSource> for SendAddr {
 impl From<&DiscoMessageSource> for SendAddr {
     fn from(value: &DiscoMessageSource) -> Self {
         match value {
+            #[cfg(feature = "native")]
             DiscoMessageSource::Udp(addr) => SendAddr::Udp(*addr),
             DiscoMessageSource::Relay { url, .. } => SendAddr::Relay(url.clone()),
         }
@@ -1268,6 +1319,7 @@ impl Handle {
     }
 
     async fn with_name(me: String, opts: Options) -> Result<Self> {
+        #[cfg(feature = "native")]
         let port_mapper = portmapper::Client::default();
 
         let Options {
@@ -1276,6 +1328,7 @@ impl Handle {
             relay_map,
             discovery,
             nodes_path,
+            #[cfg(feature = "native")]
             dns_resolver,
             #[cfg(any(test, feature = "test-utils"))]
             insecure_skip_relay_cert_verify,
@@ -1295,20 +1348,30 @@ impl Handle {
 
         let (relay_recv_sender, relay_recv_receiver) = flume::bounded(128);
 
+        #[cfg(feature = "native")]
         let (pconn4, pconn6) = bind(port)?;
+        #[cfg(feature = "native")]
         let port = pconn4.port();
 
         // NOTE: we can end up with a zero port if `std::net::UdpSocket::socket_addr` fails
-        match port.try_into() {
-            Ok(non_zero_port) => {
-                port_mapper.update_local_port(non_zero_port);
+        #[cfg(feature = "native")]
+        {
+            match port.try_into() {
+                Ok(non_zero_port) => {
+                    port_mapper.update_local_port(non_zero_port);
+                }
+                Err(_zero_port) => debug!("Skipping port mapping with zero local port"),
             }
-            Err(_zero_port) => debug!("Skipping port mapping with zero local port"),
         }
+        #[cfg(feature = "native")]
         let ipv4_addr = pconn4.local_addr()?;
+        #[cfg(feature = "native")]
         let ipv6_addr = pconn6.as_ref().and_then(|c| c.local_addr().ok());
 
+        #[cfg(feature = "native")]
         let net_checker = netcheck::Client::new(Some(port_mapper.clone()), dns_resolver.clone())?;
+        #[cfg(not(feature = "native"))]
+        let net_checker = netcheck::Client::new()?;
 
         let (actor_sender, actor_receiver) = mpsc::channel(256);
         let (relay_actor_sender, relay_actor_receiver) = mpsc::channel(256);
@@ -1330,11 +1393,13 @@ impl Handle {
             _ => NodeMap::default(),
         };
 
+        #[cfg(feature = "native")]
         let udp_state = quinn_udp::UdpState::default();
         let inner = Arc::new(MagicSock {
             me,
             port: AtomicU16::new(port),
             secret_key,
+            #[cfg(feature = "native")]
             local_addrs: std::sync::RwLock::new((ipv4_addr, ipv6_addr)),
             closing: AtomicBool::new(false),
             closed: AtomicBool::new(false),
@@ -1345,12 +1410,15 @@ impl Handle {
             ipv6_reported: Arc::new(AtomicBool::new(false)),
             relay_map,
             my_relay: Watchable::new(None),
+            #[cfg(feature = "native")]
             pconn4: pconn4.clone(),
+            #[cfg(feature = "native")]
             pconn6: pconn6.clone(),
             net_checker: net_checker.clone(),
             disco_secrets: DiscoSecrets::default(),
             node_map,
             relay_actor_sender: relay_actor_sender.clone(),
+            #[cfg(feature = "native")]
             udp_state,
             send_buffer: Default::default(),
             udp_disco_sender,
@@ -1358,6 +1426,7 @@ impl Handle {
             endpoints: Watchable::default(),
             pending_call_me_maybes: Default::default(),
             endpoints_update_state: EndpointUpdateState::new(),
+            #[cfg(feature = "native")]
             dns_resolver,
             #[cfg(any(test, feature = "test-utils"))]
             insecure_skip_relay_cert_verify,
@@ -1374,7 +1443,9 @@ impl Handle {
             .instrument(info_span!("relay-actor")),
         );
 
+        #[cfg(feature = "native")]
         let inner2 = inner.clone();
+        #[cfg(feature = "native")]
         actor_tasks.spawn(async move {
             while let Some((dst, dst_key, msg)) = udp_disco_receiver.recv().await {
                 if let Err(err) = inner2.send_disco_message_udp(dst, dst_key, &msg).await {
@@ -1384,6 +1455,7 @@ impl Handle {
         });
 
         let inner2 = inner.clone();
+        #[cfg(feature = "native")]
         let network_monitor = netmon::Monitor::new().await?;
         actor_tasks.spawn(
             async move {
@@ -1397,11 +1469,15 @@ impl Handle {
                     periodic_re_stun_timer: new_re_stun_timer(false),
                     net_info_last: None,
                     nodes_path,
+                    #[cfg(feature = "native")]
                     port_mapper,
+                    #[cfg(feature = "native")]
                     pconn4,
+                    #[cfg(feature = "native")]
                     pconn6,
                     no_v4_send: false,
                     net_checker,
+                    #[cfg(feature = "native")]
                     network_monitor,
                 };
 
@@ -1590,6 +1666,7 @@ impl AsyncUdpSocket for Handle {
         self.msock.poll_recv(cx, bufs, metas)
     }
 
+    #[cfg(feature = "native")]
     fn local_addr(&self) -> io::Result<SocketAddr> {
         match &*self.msock.local_addrs.read().expect("not poisoned") {
             (ipv4, None) => {
@@ -1603,6 +1680,11 @@ impl AsyncUdpSocket for Handle {
             }
             (_, Some(ipv6)) => Ok(*ipv6),
         }
+    }
+
+    #[cfg(not(feature = "native"))]
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        todo!()
     }
 }
 
@@ -1633,10 +1715,13 @@ struct Actor {
     nodes_path: Option<PathBuf>,
 
     // The underlying UDP sockets used to send/rcv packets.
+    #[cfg(feature = "native")]
     pconn4: UdpConn,
+    #[cfg(feature = "native")]
     pconn6: Option<UdpConn>,
 
     /// The NAT-PMP/PCP/UPnP prober/client, for requesting port mappings from NAT devices.
+    #[cfg(feature = "native")]
     port_mapper: portmapper::Client,
 
     /// Whether IPv4 UDP is known to be unable to transmit
@@ -1647,13 +1732,17 @@ struct Actor {
     /// The prober that discovers local network conditions, including the closest relay relay and NAT mappings.
     net_checker: netcheck::Client,
 
+    #[cfg(feature = "native")]
     network_monitor: netmon::Monitor,
 }
 
 impl Actor {
     async fn run(mut self) -> Result<()> {
         // Setup network monitoring
+        // TODO: implement network change monitoring in wasm
+        #[cfg(feature = "native")]
         let (link_change_s, mut link_change_r) = mpsc::channel(8);
+        #[cfg(feature = "native")]
         let _token = self
             .network_monitor
             .subscribe(move |is_major| {
@@ -1671,6 +1760,7 @@ impl Actor {
             HEARTBEAT_INTERVAL,
         );
         let mut endpoints_update_receiver = self.msock.endpoints_update_state.running.subscribe();
+        #[cfg(feature = "native")]
         let mut portmap_watcher = self.port_mapper.watch_external_address();
         let mut save_nodes_timer = if self.nodes_path.is_some() {
             tokio::time::interval_at(
@@ -1682,6 +1772,7 @@ impl Actor {
         };
 
         loop {
+            #[cfg(feature = "native")]
             tokio::select! {
                 Some(msg) = self.msg_receiver.recv() => {
                     trace!(?msg, "tick: msg");
@@ -1693,12 +1784,6 @@ impl Actor {
                     trace!("tick: re_stun {:?}", tick);
                     self.msock.re_stun("periodic");
                 }
-                Ok(()) = portmap_watcher.changed() => {
-                    trace!("tick: portmap changed");
-                    let new_external_address = *portmap_watcher.borrow();
-                    debug!("external address updated: {new_external_address:?}");
-                    self.msock.re_stun("portmap_updated");
-                },
                 _ = endpoint_heartbeat_timer.tick() => {
                     trace!("tick: endpoint heartbeat {} endpoints", self.msock.node_map.node_count());
                     // TODO: this might trigger too many packets at once, pace this
@@ -1710,6 +1795,7 @@ impl Actor {
                 _ = endpoints_update_receiver.changed() => {
                     let reason = *endpoints_update_receiver.borrow();
                     trace!("tick: endpoints update receiver {:?}", reason);
+                    #[cfg(feature = "native")]
                     if let Some(reason) = reason {
                         self.update_endpoints(reason).await;
                     }
@@ -1724,9 +1810,53 @@ impl Actor {
                         Err(e) => debug!(%e, "failed to persist known nodes"),
                     }
                 }
+                Ok(()) = portmap_watcher.changed() => {
+                    trace!("tick: portmap changed");
+                    let new_external_address = *portmap_watcher.borrow();
+                    debug!("external address updated: {new_external_address:?}");
+                    self.msock.re_stun("portmap_updated");
+                },
                 Some(is_major) = link_change_r.recv() => {
                     trace!("tick: link change {}", is_major);
                     self.handle_network_change(is_major).await;
+                }
+                else => {
+                    trace!("tick: other");
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            tokio::select! {
+                Some(msg) = self.msg_receiver.recv() => {
+                    trace!(?msg, "tick: msg");
+                    if self.handle_actor_message(msg).await {
+                        return Ok(());
+                    }
+                }
+                tick = self.periodic_re_stun_timer.tick() => {
+                    trace!("tick: re_stun {:?}", tick);
+                    self.msock.re_stun("periodic");
+                }
+                _ = endpoint_heartbeat_timer.tick() => {
+                    trace!("tick: endpoint heartbeat {} endpoints", self.msock.node_map.node_count());
+                    // TODO: this might trigger too many packets at once, pace this
+
+                    self.msock.node_map.prune_inactive();
+                    let msgs = self.msock.node_map.nodes_stayin_alive();
+                    self.handle_ping_actions(msgs).await;
+                }
+                _ = endpoints_update_receiver.changed() => {
+                    let reason = *endpoints_update_receiver.borrow();
+                    trace!("tick: endpoints update receiver {:?}", reason);
+                }
+                _ = save_nodes_timer.tick(), if self.nodes_path.is_some() => {
+                    trace!("tick: nodes_timer");
+                    let path = self.nodes_path.as_ref().expect("precondition: `is_some()`");
+
+                    self.msock.node_map.prune_inactive();
+                    match self.msock.node_map.save_to_file(path).await {
+                        Ok(count) => debug!(count, "nodes persisted"),
+                        Err(e) => debug!(%e, "failed to persist known nodes"),
+                    }
                 }
                 else => {
                     trace!("tick: other");
@@ -1739,6 +1869,7 @@ impl Actor {
         debug!("link change detected: major? {}", is_major);
 
         if is_major {
+            #[cfg(feature = "native")]
             self.msock.dns_resolver.clear_cache();
             self.msock.re_stun("link-change-major");
             self.close_stale_relay_connections().await;
@@ -1776,15 +1907,18 @@ impl Actor {
                         Err(e) => debug!(%e, "failed to persist known nodes"),
                     }
                 }
+                #[cfg(feature = "native")]
                 self.port_mapper.deactivate();
                 self.relay_actor_cancel_token.cancel();
 
                 // Ignore errors from pconnN
                 // They will frequently have been closed already by a call to connBind.Close.
                 debug!("stopping connections");
+                #[cfg(feature = "native")]
                 if let Some(ref conn) = self.pconn6 {
                     conn.close().await.ok();
                 }
+                #[cfg(feature = "native")]
                 self.pconn4.close().await.ok();
 
                 debug!("shutdown complete");
@@ -1818,6 +1952,7 @@ impl Actor {
                 self.finalize_endpoints_update(why);
             }
             ActorMessage::NetworkChange => {
+                #[cfg(feature = "native")]
                 self.network_monitor.network_change().await.ok();
             }
             #[cfg(test)]
@@ -1829,6 +1964,7 @@ impl Actor {
         false
     }
 
+    #[cfg(feature = "native")]
     fn normalized_local_addr(&self) -> io::Result<SocketAddr> {
         let (v4, v6) = self.local_addr();
         if let Some(v6) = v6 {
@@ -1836,7 +1972,13 @@ impl Actor {
         }
         v4
     }
+    #[cfg(not(feature = "native"))]
+    fn normalized_local_addr(&self) -> io::Result<SocketAddr> {
+        // need something
+        todo!()
+    }
 
+    #[cfg(feature = "native")]
     fn local_addr(&self) -> (io::Result<SocketAddr>, Option<io::Result<SocketAddr>>) {
         // TODO: think more about this
         // needs to pretend ipv6 always as the fake addrs are ipv6
@@ -1901,6 +2043,7 @@ impl Actor {
     /// never be invoked directly.  Some day this will be refactored to not allow this easy
     /// mistake to be made.
     #[instrument(level = "debug", skip_all)]
+    #[cfg(feature = "native")]
     async fn update_endpoints(&mut self, why: &'static str) {
         inc!(MagicsockMetrics, update_endpoints);
 
@@ -1910,6 +2053,7 @@ impl Actor {
     }
 
     /// Stores the results of a successful endpoint update.
+    #[cfg(feature = "native")]
     async fn store_endpoints_update(&mut self, nr: Option<Arc<netcheck::Report>>) {
         let portmap_watcher = self.port_mapper.watch_external_address();
 
@@ -1962,6 +2106,7 @@ impl Actor {
                 add_addr!(already, eps, global_v6.into(), config::EndpointType::Stun);
             }
         }
+
         let local_addr_v4 = self.pconn4.local_addr().ok();
         let local_addr_v6 = self.pconn6.as_ref().and_then(|c| c.local_addr().ok());
 
@@ -2126,15 +2271,19 @@ impl Actor {
         }
 
         let relay_map = self.msock.relay_map.clone();
+        #[cfg(feature = "native")]
         let pconn4 = Some(self.pconn4.as_socket());
+        #[cfg(feature = "native")]
         let pconn6 = self.pconn6.as_ref().map(|p| p.as_socket());
 
         debug!("requesting netcheck report");
-        match self
+        #[cfg(feature = "native")]
+        let channel = self
             .net_checker
-            .get_report_channel(relay_map, pconn4, pconn6)
-            .await
-        {
+            .get_report_channel(relay_map, pconn4, pconn6);
+        #[cfg(not(feature = "native"))]
+        let channel = self.net_checker.get_report_channel(relay_map);
+        match channel.await {
             Ok(rx) => {
                 let msg_sender = self.msg_sender.clone();
                 tokio::task::spawn(async move {
@@ -2173,11 +2322,15 @@ impl Actor {
             );
             self.no_v4_send = !r.ipv4_can_send;
 
+            #[cfg(feature = "native")]
             let have_port_map = self.port_mapper.watch_external_address().borrow().is_some();
+            #[cfg(not(feature = "native"))]
+            let have_port_map = false;
             let mut ni = config::NetInfo {
                 relay_latency: Default::default(),
                 mapping_varies_by_dest_ip: r.mapping_varies_by_dest_ip,
                 hair_pinning: r.hair_pinning,
+                #[cfg(feature = "native")]
                 portmap_probe: r.portmap_probe.clone(),
                 have_port_map,
                 working_ipv6: Some(r.ipv6),
@@ -2209,6 +2362,7 @@ impl Actor {
             // TODO: set link type
             self.call_net_info_callback(ni).await;
         }
+        #[cfg(feature = "native")]
         self.store_endpoints_update(report).await;
     }
 
@@ -2275,13 +2429,17 @@ impl Actor {
     /// will error out soon enough.  Closing them eagerly speeds this up however and allows
     /// re-establishing a relay connection faster.
     async fn close_stale_relay_connections(&self) {
-        let ifs = interfaces::State::new().await;
-        let local_ips = ifs
-            .interfaces
-            .values()
-            .flat_map(|netif| netif.addrs())
-            .map(|ipnet| ipnet.addr())
-            .collect();
+        #[cfg(feature = "native")]
+        let local_ips = {
+            let ifs = interfaces::State::new().await;
+            ifs.interfaces
+                .values()
+                .flat_map(|netif| netif.addrs())
+                .map(|ipnet| ipnet.addr())
+                .collect()
+        };
+        #[cfg(not(feature = "native"))]
+        let local_ips = Vec::new();
         self.send_relay_actor(RelayActorMessage::MaybeCloseRelaysOnRebind(local_ips));
     }
 
@@ -2342,6 +2500,7 @@ fn new_re_stun_timer(initial_delay: bool) -> time::Interval {
 }
 
 /// Initial connection setup.
+#[cfg(feature = "native")]
 fn bind(port: u16) -> Result<(UdpConn, Option<UdpConn>)> {
     let pconn4 = UdpConn::bind(port, IpFamily::V4).context("bind IPv4 failed")?;
     let ip4_port = pconn4.local_addr()?.port();
@@ -2546,7 +2705,7 @@ fn disco_message_sent(msg: &disco::Message) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 pub(crate) mod tests {
     use anyhow::Context;
     use futures_lite::StreamExt;

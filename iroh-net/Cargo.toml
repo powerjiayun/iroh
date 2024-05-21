@@ -59,7 +59,7 @@ rustls = { version = "0.21.11", default-features = false, features = ["dangerous
 serde = { version = "1", features = ["derive", "rc"] }
 smallvec = "1.11.1"
 socket2 = { version = "0.5.3", optional = true }
-stun-rs = { version = "0.1.5", optional = true }
+stun-rs = "0.1.5"
 surge-ping = { version = "0.8.0", optional = true }
 thiserror = "1"
 time = "0.3.20"
@@ -119,7 +119,7 @@ harness = false
 duct = "0.13.6"
 
 [features]
-default = ["metrics", "native"]
+default = ["metrics", "quinn/runtime-tokio"] # , "native"]
 iroh-relay = [
   "dep:clap",
   "dep:toml",
@@ -144,7 +144,6 @@ native = [
   "dep:hickory-resolver",
   "dep:igd-next",
   "dep:pkarr",
-  "dep:stun-rs",
   "dep:surge-ping",
   "quinn/runtime-tokio",
 ]

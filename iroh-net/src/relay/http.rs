@@ -31,7 +31,7 @@ pub(crate) fn make_tls_config() -> TlsConfig {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
 

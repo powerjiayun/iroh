@@ -492,6 +492,7 @@ impl RelayActor {
 
         let (dc, dc_receiver) = builder.build(
             self.msock.secret_key.clone(),
+            #[cfg(feature = "native")]
             self.msock.dns_resolver.clone(),
         );
 

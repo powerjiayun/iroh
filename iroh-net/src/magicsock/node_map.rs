@@ -110,6 +110,7 @@ impl NodeMap {
         self.inner.lock().node_count()
     }
 
+    #[cfg(feature = "native")]
     pub(super) fn receive_udp(&self, udp_addr: SocketAddr) -> Option<(PublicKey, QuicMappedAddr)> {
         self.inner.lock().receive_udp(udp_addr)
     }
@@ -373,6 +374,7 @@ impl NodeMapInner {
     }
 
     /// Marks the node we believe to be at `ipp` as recently used.
+    #[cfg(feature = "native")]
     fn receive_udp(&mut self, udp_addr: SocketAddr) -> Option<(NodeId, QuicMappedAddr)> {
         let ip_port: IpPort = udp_addr.into();
         let Some(node_state) = self.get_mut(NodeStateKey::IpPort(&ip_port)) else {
@@ -485,6 +487,7 @@ impl NodeMapInner {
         });
 
         let handled = node_state.handle_ping(src.clone(), tx_id);
+        #[cfg(feature = "native")]
         if let SendAddr::Udp(ref addr) = src {
             if matches!(handled.role, PingRole::NewPath) {
                 self.set_node_key_for_ip_port(*addr, &sender);
@@ -634,7 +637,7 @@ impl IpPort {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::node_state::MAX_INACTIVE_DIRECT_ADDRESSES;
     use super::*;

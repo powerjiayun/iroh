@@ -15,13 +15,16 @@ pub mod defaults;
 pub mod dialer;
 mod disco;
 pub mod discovery;
+#[cfg(feature = "native")]
 pub mod dns;
 pub mod endpoint;
 mod magicsock;
 pub mod metrics;
 pub mod net;
 pub mod netcheck;
+#[cfg(feature = "native")]
 pub mod ping;
+#[cfg(feature = "native")]
 pub mod portmapper;
 pub mod relay;
 pub mod stun;

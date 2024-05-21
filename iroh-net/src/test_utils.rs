@@ -9,7 +9,9 @@ use crate::{
     relay::{RelayMap, RelayNode, RelayUrl},
 };
 
+#[cfg(feature = "native")]
 pub use dns_and_pkarr_servers::DnsPkarrServer;
+#[cfg(feature = "native")]
 pub use dns_server::create_dns_resolver;
 
 /// A drop guard to clean up test infrastructure.
@@ -68,6 +70,7 @@ pub async fn run_relay_server() -> Result<(RelayMap, RelayUrl, CleanupDropGuard)
     Ok((m, url, CleanupDropGuard(tx)))
 }
 
+#[cfg(feature = "native")]
 pub(crate) mod dns_and_pkarr_servers {
     use anyhow::Result;
     use iroh_base::key::{NodeId, SecretKey};
@@ -147,6 +150,7 @@ pub(crate) mod dns_and_pkarr_servers {
     }
 }
 
+#[cfg(feature = "native")]
 pub(crate) mod dns_server {
     use std::future::Future;
     use std::net::{Ipv4Addr, SocketAddr};
@@ -253,6 +257,7 @@ pub(crate) mod dns_server {
     }
 }
 
+#[cfg(feature = "native")]
 pub(crate) mod pkarr_relay {
     use std::future::IntoFuture;
     use std::net::{Ipv4Addr, SocketAddr};
@@ -327,6 +332,7 @@ pub(crate) mod pkarr_relay {
     }
 }
 
+#[cfg(feature = "native")]
 pub(crate) mod pkarr_dns_state {
     use anyhow::{bail, Result};
     use parking_lot::{Mutex, MutexGuard};

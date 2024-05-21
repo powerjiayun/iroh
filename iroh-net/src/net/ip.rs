@@ -6,6 +6,7 @@ const IFF_UP: u32 = 0x1;
 const IFF_LOOPBACK: u32 = 0x8;
 
 /// List of machine's IP addresses.
+#[cfg(feature = "native")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalAddresses {
     /// Loopback addresses.
@@ -14,12 +15,14 @@ pub struct LocalAddresses {
     pub regular: Vec<IpAddr>,
 }
 
+#[cfg(feature = "native")]
 impl Default for LocalAddresses {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(feature = "native")]
 impl LocalAddresses {
     /// Returns the machine's IP addresses.
     /// If there are no regular addresses it will return any IPv4 linklocal or IPv6 unique local
@@ -91,10 +94,12 @@ impl LocalAddresses {
     }
 }
 
+#[cfg(feature = "native")]
 pub(crate) const fn is_up(interface: &netdev::Interface) -> bool {
     interface.flags & IFF_UP != 0
 }
 
+#[cfg(feature = "native")]
 pub(crate) const fn is_loopback(interface: &netdev::Interface) -> bool {
     interface.flags & IFF_LOOPBACK != 0
 }
@@ -152,7 +157,7 @@ pub const fn is_unicast_link_local(addr: Ipv6Addr) -> bool {
     (addr.segments()[0] & 0xffc0) == 0xfe80
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
 

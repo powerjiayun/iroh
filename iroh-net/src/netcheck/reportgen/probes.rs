@@ -11,6 +11,7 @@ use std::sync::Arc;
 use anyhow::{ensure, Result};
 use tokio::time::Duration;
 
+#[cfg(feature = "native")]
 use crate::net::interfaces;
 use crate::netcheck::Report;
 use crate::relay::{RelayMap, RelayNode, RelayUrl};
@@ -62,6 +63,7 @@ pub(super) enum ProbeProto {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, derive_more::Display)]
 pub(super) enum Probe {
     #[display("STUN Ipv4 after {delay:?} to {node}")]
+    #[cfg(feature = "native")]
     StunIpv4 {
         /// When the probe is started, relative to the time that `get_report` is called.
         /// One probe in each `ProbePlan` should have a delay of 0. Non-zero values
@@ -72,6 +74,7 @@ pub(super) enum Probe {
         node: Arc<RelayNode>,
     },
     #[display("STUN Ipv6 after {delay:?} to {node}")]
+    #[cfg(feature = "native")]
     StunIpv6 {
         delay: Duration,
         node: Arc<RelayNode>,
@@ -82,11 +85,13 @@ pub(super) enum Probe {
         node: Arc<RelayNode>,
     },
     #[display("ICMPv4 after {delay:?} to {node}")]
+    #[cfg(feature = "native")]
     IcmpV4 {
         delay: Duration,
         node: Arc<RelayNode>,
     },
     #[display("ICMPv6 after {delay:?} to {node}")]
+    #[cfg(feature = "native")]
     IcmpV6 {
         delay: Duration,
         node: Arc<RelayNode>,
@@ -96,31 +101,37 @@ pub(super) enum Probe {
 impl Probe {
     pub(super) fn delay(&self) -> Duration {
         match self {
+            #[cfg(feature = "native")]
             Probe::StunIpv4 { delay, .. }
             | Probe::StunIpv6 { delay, .. }
-            | Probe::Https { delay, .. }
             | Probe::IcmpV4 { delay, .. }
             | Probe::IcmpV6 { delay, .. } => *delay,
+            Probe::Https { delay, .. } => *delay,
         }
     }
 
     pub(super) fn proto(&self) -> ProbeProto {
         match self {
+            #[cfg(feature = "native")]
             Probe::StunIpv4 { .. } => ProbeProto::StunIpv4,
+            #[cfg(feature = "native")]
             Probe::StunIpv6 { .. } => ProbeProto::StunIpv6,
             Probe::Https { .. } => ProbeProto::Https,
+            #[cfg(feature = "native")]
             Probe::IcmpV4 { .. } => ProbeProto::IcmpV4,
+            #[cfg(feature = "native")]
             Probe::IcmpV6 { .. } => ProbeProto::IcmpV6,
         }
     }
 
     pub(super) fn node(&self) -> &Arc<RelayNode> {
         match self {
+            #[cfg(feature = "native")]
             Probe::StunIpv4 { node, .. }
             | Probe::StunIpv6 { node, .. }
-            | Probe::Https { node, .. }
             | Probe::IcmpV4 { node, .. }
             | Probe::IcmpV6 { node, .. } => node,
+            Probe::Https { node, .. } => node,
         }
     }
 }
@@ -199,6 +210,7 @@ pub(super) struct ProbePlan(BTreeSet<ProbeSet>);
 
 impl ProbePlan {
     /// Creates an initial probe plan.
+    #[cfg(feature = "native")]
     pub(super) fn initial(relay_map: &RelayMap, if_state: &interfaces::State) -> Self {
         let mut plan = Self(BTreeSet::new());
 
@@ -267,7 +279,31 @@ impl ProbePlan {
         plan
     }
 
+    /// Creates an initial probe plan.
+    #[cfg(not(feature = "native"))]
+    pub(super) fn initial(relay_map: &RelayMap) -> Self {
+        let mut plan = Self(BTreeSet::new());
+
+        for relay_node in relay_map.nodes() {
+            // HTTP only
+            let mut https_probes = ProbeSet::new(ProbeProto::Https);
+            for attempt in 0..3 {
+                let delay = DEFAULT_INITIAL_RETRANSMIT * attempt as u32;
+
+                https_probes
+                    .push(Probe::Https {
+                        delay,
+                        node: relay_node.clone(),
+                    })
+                    .expect("adding Https probe to a Https probe set");
+            }
+            plan.add(https_probes);
+        }
+        plan
+    }
+
     /// Creates a follow up probe plan using a previous netcheck report.
+    #[cfg(feature = "native")]
     pub(super) fn with_last_report(
         relay_map: &RelayMap,
         if_state: &interfaces::State,
@@ -384,6 +420,57 @@ impl ProbePlan {
         plan
     }
 
+    /// Creates a follow up probe plan using a previous netcheck report.
+    #[cfg(not(feature = "native"))]
+    pub(super) fn with_last_report(relay_map: &RelayMap, last_report: &Report) -> Self {
+        if last_report.relay_latency.is_empty() {
+            return Self::initial(relay_map);
+        }
+        let mut plan = Self(Default::default());
+        let sorted_relays = sort_relays(relay_map, last_report);
+
+        for (ri, (url, relay_node)) in sorted_relays.into_iter().enumerate() {
+            if ri == NUM_INCREMENTAL_RELAYS {
+                break;
+            }
+
+            // By default, each node only gets one STUN packet sent,
+            // except the fastest two from the previous round.
+            let mut attempts = 1;
+            let is_fastest_two = ri < 2;
+
+            if is_fastest_two {
+                attempts = 2;
+            }
+
+            if Some(url) == last_report.preferred_relay.as_ref() {
+                // But if we already had a relay home, try extra hard to
+                // make sure it's there so we don't flip flop around.
+                attempts = 4;
+            }
+            let retransmit_delay = last_report
+                .relay_latency
+                .get(url)
+                .map(|l| l * 120 / 100) // increases latency by 20%, why?
+                .unwrap_or(DEFAULT_ACTIVE_RETRANSMIT_DELAY);
+
+            // HTTP only
+            let mut https_probes = ProbeSet::new(ProbeProto::Https);
+            for attempt in 0..attempts {
+                let delay = (retransmit_delay * attempt as u32)
+                    + (ACTIVE_RETRANSMIT_EXTRA_DELAY * attempt as u32);
+                https_probes
+                    .push(Probe::Https {
+                        delay,
+                        node: relay_node.clone(),
+                    })
+                    .expect("Pushing Https Probe to an Https ProbeSet");
+            }
+            plan.add(https_probes);
+        }
+        plan
+    }
+
     /// Returns an iterator over the [`ProbeSet`]s in this plan.
     pub(super) fn iter(&self) -> impl Iterator<Item = &ProbeSet> {
         self.0.iter()
@@ -462,7 +549,7 @@ fn sort_relays<'a>(
     prev.into_iter().map(|n| (&n.url, n)).collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use pretty_assertions::assert_eq;
 

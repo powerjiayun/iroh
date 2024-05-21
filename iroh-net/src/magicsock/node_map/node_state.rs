@@ -342,6 +342,7 @@ impl NodeState {
 
         // If we found a candidate, set to best addr
         if let Some(pong) = best_pong {
+            #[cfg(feature = "native")]
             if let SendAddr::Udp(addr) = pong.from {
                 warn!(%addr, "No best_addr was set, choose candidate with lowest latency");
                 self.best_addr.insert_if_better_or_reconfirm(
@@ -399,6 +400,7 @@ impl NodeState {
         if let Some(sp) = self.sent_pings.remove(&txid) {
             debug!(tx = %hex::encode(txid), addr = %sp.to, "pong not received in timeout");
             match sp.to {
+                #[cfg(feature = "native")]
                 SendAddr::Udp(addr) => {
                     if let Some(path_state) = self.direct_addr_state.get_mut(&addr.into()) {
                         path_state.last_ping = None;
@@ -469,6 +471,7 @@ impl NodeState {
         let now = Instant::now();
         let mut path_found = false;
         match to {
+            #[cfg(feature = "native")]
             SendAddr::Udp(addr) => {
                 if let Some(st) = self.direct_addr_state.get_mut(&addr.into()) {
                     st.last_ping.replace(now);
@@ -588,7 +591,15 @@ impl NodeState {
             .iter()
             .filter_map(|(ipp, state)| state.needs_ping(&now).then_some(*ipp))
             .filter_map(|ipp| {
-                self.start_ping(SendAddr::Udp(ipp.into()), DiscoPingPurpose::Discovery)
+                #[cfg(feature = "native")]
+                {
+                    self.start_ping(SendAddr::Udp(ipp.into()), DiscoPingPurpose::Discovery)
+                }
+                // TODO: what to do here?
+                #[cfg(not(feature = "native"))]
+                {
+                    None::<SendPing>
+                }
             })
             .for_each(|msg| {
                 use std::fmt::Write;
@@ -667,6 +678,7 @@ impl NodeState {
         let now = Instant::now();
 
         let role = match path {
+            #[cfg(feature = "native")]
             SendAddr::Udp(addr) => match self.direct_addr_state.entry(addr.into()) {
                 Entry::Occupied(mut occupied) => occupied.get_mut().handle_ping(tx_id, now),
                 Entry::Vacant(vacant) => {
@@ -694,11 +706,13 @@ impl NodeState {
             }
         };
 
+        #[cfg(feature = "native")]
         if matches!(path, SendAddr::Udp(_)) && matches!(role, PingRole::NewPath) {
             self.prune_direct_addresses();
         }
 
         // if the endpoint does not yet have a best_addrr
+        #[cfg(feature = "native")]
         let needs_ping_back = if matches!(path, SendAddr::Udp(_))
             && matches!(
                 self.best_addr.state(now),
@@ -713,6 +727,8 @@ impl NodeState {
         } else {
             None
         };
+        #[cfg(not(feature = "native"))]
+        let needs_ping_back = None;
 
         debug!(
             ?role,
@@ -823,6 +839,7 @@ impl NodeState {
                 );
 
                 match src {
+                    #[cfg(feature = "native")]
                     SendAddr::Udp(addr) => {
                         match self.direct_addr_state.get_mut(&addr.into()) {
                             None => {
@@ -870,6 +887,7 @@ impl NodeState {
 
                 // Promote this pong response to our current best address if it's lower latency.
                 // TODO(bradfitz): decide how latency vs. preference order affects decision
+                #[cfg(feature = "native")]
                 if let SendAddr::Udp(to) = sp.to {
                     debug_assert!(!is_relay, "mismatching relay & udp");
                     self.best_addr.insert_if_better_or_reconfirm(
@@ -949,6 +967,7 @@ impl NodeState {
     }
 
     /// Marks this endpoint as having received a UDP payload message.
+    #[cfg(feature = "native")]
     pub(super) fn receive_udp(&mut self, addr: IpPort, now: Instant) {
         let Some(state) = self.direct_addr_state.get_mut(&addr) else {
             debug_assert!(false, "node map inconsistency by_ip_port <-> direct addr");
@@ -978,6 +997,7 @@ impl NodeState {
 
     pub(super) fn last_ping(&self, addr: &SendAddr) -> Option<Instant> {
         match addr {
+            #[cfg(feature = "native")]
             SendAddr::Udp(addr) => self
                 .direct_addr_state
                 .get(&(*addr).into())
@@ -1016,6 +1036,7 @@ impl NodeState {
         }
 
         // Send heartbeat ping to keep the current addr going as long as we need it.
+        #[cfg(feature = "native")]
         if let Some(udp_addr) = self.best_addr.addr() {
             let elapsed = self.last_ping(&SendAddr::Udp(udp_addr)).map(|l| now - l);
             // Send a ping if the last ping is older than 2 seconds.
@@ -1460,7 +1481,7 @@ pub enum ConnectionType {
     None,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use std::net::Ipv4Addr;
 

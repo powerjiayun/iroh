@@ -4,6 +4,7 @@ use std::{collections::BTreeMap, fmt::Display, net::SocketAddr};
 
 use crate::relay::RelayUrl;
 
+#[cfg(feature = "native")]
 use super::portmapper;
 
 // TODO: This re-uses "Endpoint" again, a term that already means "a quic endpoint" and "a
@@ -73,6 +74,7 @@ pub struct NetInfo {
     pub have_port_map: bool,
 
     /// Probe indicating the presence of port mapping protocols on the LAN.
+    #[cfg(feature = "native")]
     pub portmap_probe: Option<portmapper::ProbeOutput>,
 
     /// This node's preferred relay server for incoming traffic. The node might be be temporarily
@@ -102,7 +104,13 @@ impl NetInfo {
             (Some(slf), Some(other)) => slf == other,
             _ => true, // ignore for comparison if only one report had this info
         };
-        self.mapping_varies_by_dest_ip == other.mapping_varies_by_dest_ip
+        #[cfg(feature = "native")]
+        let eq_portmap = self.portmap_probe == other.portmap_probe;
+        #[cfg(not(feature = "native"))]
+        let eq_portmap = true;
+
+        eq_portmap
+            && self.mapping_varies_by_dest_ip == other.mapping_varies_by_dest_ip
             && self.hair_pinning == other.hair_pinning
             && self.working_ipv6 == other.working_ipv6
             && self.os_has_ipv6 == other.os_has_ipv6
@@ -110,7 +118,6 @@ impl NetInfo {
             && eq_icmp_v4
             && eq_icmp_v6
             && self.have_port_map == other.have_port_map
-            && self.portmap_probe == other.portmap_probe
             && self.preferred_relay == other.preferred_relay
             && self.link_type == other.link_type
     }

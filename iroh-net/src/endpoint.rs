@@ -21,12 +21,14 @@ use crate::{
     config,
     defaults::default_relay_map,
     discovery::{Discovery, DiscoveryTask},
-    dns::{default_resolver, DnsResolver},
     key::{PublicKey, SecretKey},
     magicsock::{self, Handle},
     relay::{RelayMap, RelayMode, RelayUrl},
     tls, NodeId,
 };
+
+#[cfg(feature = "native")]
+use crate::dns::{default_resolver, DnsResolver};
 
 mod rtt_actor;
 
@@ -60,6 +62,7 @@ pub struct Builder {
     discovery: Option<Box<dyn Discovery>>,
     /// Path for known peers. See [`Builder::peers_data_path`].
     peers_path: Option<PathBuf>,
+    #[cfg(feature = "native")]
     dns_resolver: Option<DnsResolver>,
     #[cfg(any(test, feature = "test-utils"))]
     insecure_skip_relay_cert_verify: bool,
@@ -76,6 +79,7 @@ impl Default for Builder {
             keylog: Default::default(),
             discovery: Default::default(),
             peers_path: None,
+            #[cfg(feature = "native")]
             dns_resolver: None,
             #[cfg(any(test, feature = "test-utils"))]
             insecure_skip_relay_cert_verify: false,
@@ -185,6 +189,7 @@ impl Builder {
     /// By default, all magic endpoints share a DNS resolver, which is configured to use the
     /// host system's DNS configuration. You can pass a custom instance of [`DnsResolver`]
     /// here to use a differently configured DNS resolver for this endpoint.
+    #[cfg(feature = "native")]
     pub fn dns_resolver(mut self, dns_resolver: DnsResolver) -> Self {
         self.dns_resolver = Some(dns_resolver);
         self
@@ -215,6 +220,8 @@ impl Builder {
         if let Some(c) = self.concurrent_connections {
             server_config.concurrent_connections(c);
         }
+
+        #[cfg(feature = "native")]
         let dns_resolver = self
             .dns_resolver
             .unwrap_or_else(|| default_resolver().clone());
@@ -225,6 +232,7 @@ impl Builder {
             relay_map,
             nodes_path: self.peers_path,
             discovery: self.discovery,
+            #[cfg(feature = "native")]
             dns_resolver,
             #[cfg(any(test, feature = "test-utils"))]
             insecure_skip_relay_cert_verify: self.insecure_skip_relay_cert_verify,
@@ -339,6 +347,7 @@ impl Endpoint {
     /// Get the local endpoint addresses on which the underlying magic socket is bound.
     ///
     /// Returns a tuple of the IPv4 and the optional IPv6 address.
+    #[cfg(feature = "native")]
     pub fn local_addr(&self) -> (SocketAddr, Option<SocketAddr>) {
         self.msock.local_addr()
     }
@@ -633,6 +642,7 @@ impl Endpoint {
     }
 
     /// Get a reference to the DNS resolver used in this [`Endpoint`].
+    #[cfg(feature = "native")]
     pub fn dns_resolver(&self) -> &DnsResolver {
         self.msock.dns_resolver()
     }
@@ -833,7 +843,7 @@ fn try_send_rtt_msg(conn: &quinn::Connection, magic_ep: &Endpoint) {
 
 // TODO: These tests could still be flaky, lets fix that:
 // https://github.com/n0-computer/iroh/issues/1183
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
 
     use std::time::Instant;
