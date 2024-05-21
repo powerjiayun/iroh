@@ -15,7 +15,6 @@ use hyper::Request;
 use rand::Rng;
 use rustls::client::Resumption;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
-use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
@@ -566,6 +565,13 @@ impl Actor {
         .await
     }
 
+    #[cfg(not(feature = "native"))]
+    async fn connect_0(&self) -> Result<(RelayClient, RelayClientReceiver), ClientError> {
+        // Websocket connect
+        todo!()
+    }
+
+    #[cfg(feature = "native")]
     async fn connect_0(&self) -> Result<(RelayClient, RelayClientReceiver), ClientError> {
         let tcp_stream = self.dial_url().await?;
 
@@ -628,6 +634,7 @@ impl Actor {
     }
 
     /// Sends the HTTP upgrade request to the relay server.
+    #[cfg(feature = "native")]
     async fn start_upgrade<T>(io: T) -> Result<hyper::Response<Incoming>, ClientError>
     where
         T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -789,18 +796,10 @@ impl Actor {
         true
     }
 
-    #[cfg(not(feature = "native"))]
-    async fn dial_url(&self) -> Result<TcpStream, ClientError> {
-        debug!(%self.url, "dial url");
-
-        // use wasm things
-
-        todo!()
-    }
-
     #[cfg(feature = "native")]
     async fn dial_url(&self) -> Result<TcpStream, ClientError> {
         debug!(%self.url, "dial url");
+        use tokio::net::TcpStream;
 
         let prefer_ipv6 = self.prefer_ipv6().await;
         let dst_ip = resolve_host(&self.dns_resolver, &self.url, prefer_ipv6).await?;
@@ -900,6 +899,7 @@ async fn resolve_host(
     }
 }
 
+#[cfg(feature = "native")]
 fn downcast_upgrade(
     upgraded: Upgraded,
 ) -> anyhow::Result<(

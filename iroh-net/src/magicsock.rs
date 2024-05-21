@@ -115,6 +115,7 @@ pub(super) struct Options {
     pub relay_map: RelayMap,
 
     /// Path to store known nodes.
+    #[cfg(feature = "native")]
     pub nodes_path: Option<std::path::PathBuf>,
 
     /// Optional node discovery mechanism.
@@ -140,6 +141,7 @@ impl Default for Options {
             port: 0,
             secret_key: SecretKey::generate(),
             relay_map: RelayMap::empty(),
+            #[cfg(feature = "native")]
             nodes_path: None,
             discovery: None,
             #[cfg(feature = "native")]
@@ -1327,6 +1329,7 @@ impl Handle {
             secret_key,
             relay_map,
             discovery,
+            #[cfg(feature = "native")]
             nodes_path,
             #[cfg(feature = "native")]
             dns_resolver,
@@ -1334,6 +1337,7 @@ impl Handle {
             insecure_skip_relay_cert_verify,
         } = opts;
 
+        #[cfg(feature = "native")]
         let nodes_path = match nodes_path {
             Some(path) => {
                 let path = path.canonicalize().unwrap_or(path);
@@ -1378,6 +1382,7 @@ impl Handle {
         let (udp_disco_sender, mut udp_disco_receiver) = mpsc::channel(256);
 
         // load the node data
+        #[cfg(feature = "native")]
         let node_map = match nodes_path.as_ref() {
             Some(path) if path.exists() => match NodeMap::load_from_file(path) {
                 Ok(node_map) => {
@@ -1392,6 +1397,8 @@ impl Handle {
             },
             _ => NodeMap::default(),
         };
+        #[cfg(not(feature = "native"))]
+        let node_map = NodeMap::default();
 
         #[cfg(feature = "native")]
         let udp_state = quinn_udp::UdpState::default();
@@ -1468,6 +1475,7 @@ impl Handle {
                     relay_recv_sender,
                     periodic_re_stun_timer: new_re_stun_timer(false),
                     net_info_last: None,
+                    #[cfg(feature = "native")]
                     nodes_path,
                     #[cfg(feature = "native")]
                     port_mapper,
@@ -1712,6 +1720,7 @@ struct Actor {
     /// The `NetInfo` provided in the last call to `net_info_func`. It's used to deduplicate calls to netInfoFunc.
     net_info_last: Option<config::NetInfo>,
     /// Path where connection info from [`MagicSock::node_map`] is persisted.
+    #[cfg(feature = "native")]
     nodes_path: Option<PathBuf>,
 
     // The underlying UDP sockets used to send/rcv packets.
@@ -1762,6 +1771,7 @@ impl Actor {
         let mut endpoints_update_receiver = self.msock.endpoints_update_state.running.subscribe();
         #[cfg(feature = "native")]
         let mut portmap_watcher = self.port_mapper.watch_external_address();
+        #[cfg(feature = "native")]
         let mut save_nodes_timer = if self.nodes_path.is_some() {
             tokio::time::interval_at(
                 time::Instant::now() + SAVE_NODES_INTERVAL,
@@ -1848,16 +1858,6 @@ impl Actor {
                     let reason = *endpoints_update_receiver.borrow();
                     trace!("tick: endpoints update receiver {:?}", reason);
                 }
-                _ = save_nodes_timer.tick(), if self.nodes_path.is_some() => {
-                    trace!("tick: nodes_timer");
-                    let path = self.nodes_path.as_ref().expect("precondition: `is_some()`");
-
-                    self.msock.node_map.prune_inactive();
-                    match self.msock.node_map.save_to_file(path).await {
-                        Ok(count) => debug!(count, "nodes persisted"),
-                        Err(e) => debug!(%e, "failed to persist known nodes"),
-                    }
-                }
                 else => {
                     trace!("tick: other");
                 }
@@ -1899,6 +1899,7 @@ impl Actor {
                 debug!("shutting down");
 
                 self.msock.node_map.notify_shutdown();
+                #[cfg(feature = "native")]
                 if let Some(path) = self.nodes_path.as_ref() {
                     match self.msock.node_map.save_to_file(path).await {
                         Ok(count) => {

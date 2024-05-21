@@ -2,14 +2,16 @@
 //! upgrades.
 //!
 mod client;
+#[cfg(feature = "native")]
 mod server;
 
 pub use self::client::{Client, ClientBuilder, ClientError, ClientReceiver};
+#[cfg(feature = "native")]
 pub use self::server::{Server, ServerBuilder, TlsAcceptor, TlsConfig};
 
 pub(crate) const HTTP_UPGRADE_PROTOCOL: &str = "iroh derp http";
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(all(any(test, feature = "test-utils"), feature = "native"))]
 pub(crate) fn make_tls_config() -> TlsConfig {
     let subject_alt_names = vec!["localhost".to_string()];
 

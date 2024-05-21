@@ -30,6 +30,7 @@ pub struct CleanupDropGuard(pub(crate) oneshot::Sender<()>);
 /// is always `Some` as that is how the [`Endpoint::connect`] API expects it.
 ///
 /// [`Endpoint::connect`]: crate::endpoint::Endpoint
+#[cfg(feature = "native")]
 pub async fn run_relay_server() -> Result<(RelayMap, RelayUrl, CleanupDropGuard)> {
     let server_key = SecretKey::generate();
     let me = server_key.public().fmt_short();

@@ -126,9 +126,13 @@ impl Client {
             #[cfg(feature = "native")]
             dns_resolver,
         };
-        let task = tokio::spawn(
-            async move { actor.run().await }.instrument(info_span!("reportgen.actor")),
-        );
+        let fut = async move { actor.run().await }.instrument(info_span!("reportgen.actor"));
+
+        #[cfg(feature = "native")]
+        let task = tokio::task::spawn(fut);
+        #[cfg(not(feature = "native"))]
+        let task = tokio::task::spawn_local(fut);
+
         Self {
             _drop_guard: CancelOnDrop::new("reportgen actor", task.abort_handle()),
         }
@@ -559,6 +563,7 @@ impl Actor {
                         Ok(Err(err)) => {
                             let err: Result<reqwest::Error, _> = err.downcast();
                             match err {
+                                #[cfg(not(target_arch = "wasm32"))]
                                 Ok(req_err) if req_err.is_connect() => {
                                     debug!("check_captive_portal failed: {req_err:#}");
                                 }
@@ -976,9 +981,12 @@ async fn check_captive_portal(dm: &RelayMap, preferred_relay: Option<RelayUrl>) 
         }
     };
 
+    #[cfg(not(target_arch = "wasm32"))]
     let client = reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
+    #[cfg(target_arch = "wasm32")]
+    let client = reqwest::ClientBuilder::new().build()?;
 
     // Note: the set of valid characters in a challenge and the total
     // length is limited; see is_challenge_char in bin/iroh-relay for more

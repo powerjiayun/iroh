@@ -230,6 +230,7 @@ impl Builder {
             port: bind_port,
             secret_key,
             relay_map,
+            #[cfg(feature = "native")]
             nodes_path: self.peers_path,
             discovery: self.discovery,
             #[cfg(feature = "native")]
@@ -303,11 +304,19 @@ impl Endpoint {
         // the packet if grease_quic_bit is set to false.
         endpoint_config.grease_quic_bit(false);
 
+        #[cfg(not(target_arch = "wasm32"))]
         let endpoint = quinn::Endpoint::new_with_abstract_socket(
             endpoint_config,
             server_config,
             msock.clone(),
             Arc::new(quinn::TokioRuntime),
+        )?;
+        #[cfg(target_arch = "wasm32")]
+        let endpoint = quinn::Endpoint::new_with_abstract_socket(
+            endpoint_config,
+            server_config,
+            msock.clone(),
+            Arc::new(quinn::WasmRuntime),
         )?;
         trace!("created quinn endpoint");
 

@@ -85,6 +85,7 @@ enum NodeStateKey<'a> {
 
 impl NodeMap {
     /// Create a new [`NodeMap`] from data stored in `path`.
+    #[cfg(feature = "native")]
     pub(super) fn load_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         Ok(Self::from_inner(NodeMapInner::load_from_file(path)?))
     }
@@ -239,6 +240,7 @@ impl NodeMap {
     }
 
     /// Saves the known node info to the given path, returning the number of nodes persisted.
+    #[cfg(feature = "native")]
     pub(super) async fn save_to_file(&self, path: &Path) -> anyhow::Result<usize> {
         ensure!(!path.is_dir(), "{} must be a file", path.display());
 
@@ -306,6 +308,7 @@ impl NodeMapInner {
     }
 
     /// Create a new [`NodeMap`] from data stored in `path`.
+    #[cfg(feature = "native")]
     fn load_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let path = path.as_ref();
         ensure!(path.is_file(), "{} is not a file", path.display());

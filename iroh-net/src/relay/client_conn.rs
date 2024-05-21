@@ -1,11 +1,14 @@
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context as _, Result};
 use bytes::Bytes;
 use futures_lite::StreamExt;
 use futures_util::SinkExt;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
@@ -16,10 +19,8 @@ use crate::{disco::looks_like_disco_wrapper, key::PublicKey};
 
 use iroh_metrics::{inc, inc_by};
 
-use super::codec::{DerpCodec, Frame};
-use super::server::MaybeTlsStream;
 use super::{
-    codec::{write_frame, KEEP_ALIVE},
+    codec::{write_frame, DerpCodec, Frame, KEEP_ALIVE},
     metrics::Metrics,
     types::{Packet, ServerMessage},
 };
@@ -447,6 +448,102 @@ impl ClientConnIo {
                 .await?;
         }
         Ok(())
+    }
+}
+
+/// Whether or not the underlying [`tokio::net::TcpStream`] is served over Tls
+#[derive(Debug)]
+pub enum MaybeTlsStream {
+    /// A plain non-Tls [`tokio::net::TcpStream`]
+    #[cfg(feature = "native")]
+    Plain(tokio::net::TcpStream),
+    /// A Tls wrapped [`tokio::net::TcpStream`]
+    #[cfg(feature = "native")]
+    Tls(tokio_rustls::server::TlsStream<tokio::net::TcpStream>),
+    Websocket,
+    #[cfg(test)]
+    Test(tokio::io::DuplexStream),
+}
+
+impl AsyncRead for MaybeTlsStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            #[cfg(feature = "native")]
+            MaybeTlsStream::Plain(ref mut s) => Pin::new(s).poll_read(cx, buf),
+            #[cfg(feature = "native")]
+            MaybeTlsStream::Tls(ref mut s) => Pin::new(s).poll_read(cx, buf),
+            MaybeTlsStream::Websocket => todo!(),
+            #[cfg(test)]
+            MaybeTlsStream::Test(ref mut s) => Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for MaybeTlsStream {
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<std::result::Result<(), std::io::Error>> {
+        match &mut *self {
+            #[cfg(feature = "native")]
+            MaybeTlsStream::Plain(ref mut s) => Pin::new(s).poll_flush(cx),
+            #[cfg(feature = "native")]
+            MaybeTlsStream::Tls(ref mut s) => Pin::new(s).poll_flush(cx),
+            MaybeTlsStream::Websocket => todo!(),
+            #[cfg(test)]
+            MaybeTlsStream::Test(ref mut s) => Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<std::result::Result<(), std::io::Error>> {
+        match &mut *self {
+            #[cfg(feature = "native")]
+            MaybeTlsStream::Plain(ref mut s) => Pin::new(s).poll_shutdown(cx),
+            #[cfg(feature = "native")]
+            MaybeTlsStream::Tls(ref mut s) => Pin::new(s).poll_shutdown(cx),
+            MaybeTlsStream::Websocket => todo!(),
+            #[cfg(test)]
+            MaybeTlsStream::Test(ref mut s) => Pin::new(s).poll_shutdown(cx),
+        }
+    }
+
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::result::Result<usize, std::io::Error>> {
+        match &mut *self {
+            #[cfg(feature = "native")]
+            MaybeTlsStream::Plain(ref mut s) => Pin::new(s).poll_write(cx, buf),
+            #[cfg(feature = "native")]
+            MaybeTlsStream::Tls(ref mut s) => Pin::new(s).poll_write(cx, buf),
+            MaybeTlsStream::Websocket => todo!(),
+            #[cfg(test)]
+            MaybeTlsStream::Test(ref mut s) => Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> Poll<std::result::Result<usize, std::io::Error>> {
+        match &mut *self {
+            #[cfg(feature = "native")]
+            MaybeTlsStream::Plain(ref mut s) => Pin::new(s).poll_write_vectored(cx, bufs),
+            #[cfg(feature = "native")]
+            MaybeTlsStream::Tls(ref mut s) => Pin::new(s).poll_write_vectored(cx, bufs),
+            MaybeTlsStream::Websocket => todo!(),
+            #[cfg(test)]
+            MaybeTlsStream::Test(ref mut s) => Pin::new(s).poll_write_vectored(cx, bufs),
+        }
     }
 }
 

@@ -10,11 +10,8 @@ use tracing::{Instrument, Span};
 
 use crate::key::PublicKey;
 
-use super::{
-    client_conn::{ClientConnBuilder, ClientConnManager},
-    metrics::Metrics,
-    types::Packet,
-};
+use super::client_conn::{ClientConnBuilder, ClientConnManager};
+use super::{metrics::Metrics, types::Packet};
 
 /// Number of times we try to send to a client connection before dropping the data;
 const RETRIES: usize = 3;
@@ -278,7 +275,10 @@ mod tests {
             ClientConnBuilder {
                 key,
                 conn_num,
-                io: Framed::new(crate::relay::server::MaybeTlsStream::Test(io), DerpCodec),
+                io: Framed::new(
+                    crate::relay::client_conn::MaybeTlsStream::Test(io),
+                    DerpCodec,
+                ),
                 write_timeout: None,
                 channel_capacity: 10,
                 server_channel,
