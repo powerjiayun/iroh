@@ -288,24 +288,28 @@ impl ClientBuilder {
 
         // create task to handle writing to the server
         let (writer_sender, writer_recv) = mpsc::channel(PER_CLIENT_SEND_QUEUE_DEPTH);
-        let writer_task = tokio::task::spawn(
-            async move {
-                let client_writer = ClientWriter {
-                    rate_limiter,
-                    writer: self.writer,
-                    recv_msgs: writer_recv,
-                };
-                client_writer.run().await?;
-                Ok(())
-            }
-            .instrument(info_span!("client.writer")),
-        );
+        let fut = async move {
+            let client_writer = ClientWriter {
+                rate_limiter,
+                writer: self.writer,
+                recv_msgs: writer_recv,
+            };
+            client_writer.run().await?;
+            Ok(())
+        }
+        .instrument(info_span!("client.writer"));
+
+        #[cfg(feature = "native")]
+        let writer_task = tokio::task::spawn(fut);
+        #[cfg(not(feature = "native"))]
+        let writer_task = tokio::task::spawn_local(fut);
 
         let (reader_sender, reader_recv) = mpsc::channel(PER_CLIENT_READ_QUEUE_DEPTH);
         let writer_sender2 = writer_sender.clone();
-        let reader_task = tokio::task::spawn(async move {
+        let fut = async move {
             loop {
-                let frame = tokio::time::timeout(CLIENT_RECV_TIMEOUT, self.reader.next()).await;
+                let frame =
+                    crate::util::time::timeout(CLIENT_RECV_TIMEOUT, self.reader.next()).await;
                 let res = match frame {
                     Ok(Some(Ok(frame))) => process_incoming_frame(frame),
                     Ok(Some(Err(err))) => {
@@ -338,7 +342,11 @@ impl ClientBuilder {
                     break;
                 }
             }
-        });
+        };
+        #[cfg(feature = "native")]
+        let reader_task = tokio::task::spawn(fut);
+        #[cfg(not(feature = "native"))]
+        let reader_task = tokio::task::spawn_local(fut);
 
         let client = Client {
             inner: Arc::new(InnerClient {

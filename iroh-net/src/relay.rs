@@ -22,10 +22,11 @@ pub(crate) mod server;
 pub(crate) mod types;
 
 pub use self::client::{Client as RelayClient, ReceivedMessage};
+pub use self::client_conn::MaybeTlsStream as MaybeTlsStreamServer;
 pub use self::codec::MAX_PACKET_SIZE;
 pub use self::http::Client as HttpClient;
 pub use self::map::{RelayMap, RelayMode, RelayNode};
 pub use self::metrics::Metrics;
 #[cfg(feature = "native")]
-pub use self::server::{ClientConnHandler, MaybeTlsStream as MaybeTlsStreamServer, Server};
+pub use self::server::{ClientConnHandler, Server};
 pub use iroh_base::node_addr::RelayUrl;

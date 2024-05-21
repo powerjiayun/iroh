@@ -27,7 +27,6 @@ use iroh_metrics::inc;
 use rand::seq::IteratorRandom;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
-use tokio::time::{self, Instant};
 use tracing::{debug, debug_span, error, info_span, trace, warn, Instrument, Span};
 
 use super::NetcheckMetrics;
@@ -46,6 +45,7 @@ use crate::ping::{PingError, Pinger};
 use crate::portmapper;
 use crate::relay::{RelayMap, RelayNode, RelayUrl};
 use crate::stun;
+use crate::util::time::{self, Instant};
 use crate::util::{CancelOnDrop, MaybeFuture};
 
 #[cfg(feature = "native")]
@@ -263,9 +263,9 @@ impl Actor {
         let mut captive_task = self.prepare_captive_portal_task();
         let mut probes = self.spawn_probes_task().await?;
 
-        let total_timer = tokio::time::sleep(OVERALL_REPORT_TIMEOUT);
+        let total_timer = crate::util::time::sleep(OVERALL_REPORT_TIMEOUT);
         tokio::pin!(total_timer);
-        let probe_timer = tokio::time::sleep(PROBES_TIMEOUT);
+        let probe_timer = crate::util::time::sleep(PROBES_TIMEOUT);
         tokio::pin!(probe_timer);
 
         loop {
@@ -448,19 +448,21 @@ impl Actor {
                 delay=?timeout,
                 "Have enough probe reports, aborting further probes soon",
             );
-            tokio::spawn(
-                async move {
-                    time::sleep(timeout).await;
-                    // Because we do this after a timeout it is entirely normal that the
-                    // actor is no longer there by the time we send this message.
-                    reportcheck
-                        .send(Message::AbortProbes)
-                        .await
-                        .map_err(|err| trace!("Failed to abort all probes: {err:#}"))
-                        .ok();
-                }
-                .instrument(Span::current()),
-            );
+            let fut = async move {
+                time::sleep(timeout).await;
+                // Because we do this after a timeout it is entirely normal that the
+                // actor is no longer there by the time we send this message.
+                reportcheck
+                    .send(Message::AbortProbes)
+                    .await
+                    .map_err(|err| trace!("Failed to abort all probes: {err:#}"))
+                    .ok();
+            }
+            .instrument(Span::current());
+            #[cfg(feature = "native")]
+            tokio::task::spawn(fut);
+            #[cfg(not(feature = "native"))]
+            tokio::task::spawn_local(fut);
         }
     }
 
@@ -551,9 +553,9 @@ impl Actor {
             self.outstanding_tasks.captive_task = true;
             MaybeFuture {
                 inner: Some(Box::pin(async move {
-                    tokio::time::sleep(CAPTIVE_PORTAL_DELAY).await;
+                    crate::util::time::sleep(CAPTIVE_PORTAL_DELAY).await;
                     debug!("Captive portal check started after {CAPTIVE_PORTAL_DELAY:?}");
-                    let captive_portal_check = tokio::time::timeout(
+                    let captive_portal_check = crate::util::time::timeout(
                         CAPTIVE_PORTAL_TIMEOUT,
                         check_captive_portal(&dm, preferred_relay)
                             .instrument(debug_span!("captive-portal")),
@@ -644,23 +646,25 @@ impl Actor {
                 #[cfg(feature = "native")]
                 let dns_resolver = self.dns_resolver.clone();
 
-                set.spawn(
-                    run_probe(
-                        reportstate,
-                        #[cfg(feature = "native")]
-                        stun_sock4,
-                        #[cfg(feature = "native")]
-                        stun_sock6,
-                        relay_node,
-                        probe.clone(),
-                        netcheck,
-                        #[cfg(feature = "native")]
-                        pinger,
-                        #[cfg(feature = "native")]
-                        dns_resolver,
-                    )
-                    .instrument(debug_span!("run_probe", %probe)),
-                );
+                let fut = run_probe(
+                    reportstate,
+                    #[cfg(feature = "native")]
+                    stun_sock4,
+                    #[cfg(feature = "native")]
+                    stun_sock6,
+                    relay_node,
+                    probe.clone(),
+                    netcheck,
+                    #[cfg(feature = "native")]
+                    pinger,
+                    #[cfg(feature = "native")]
+                    dns_resolver,
+                )
+                .instrument(debug_span!("run_probe", %probe));
+                #[cfg(feature = "native")]
+                set.spawn(fut);
+                #[cfg(not(feature = "native"))]
+                set.spawn_local(fut);
             }
 
             // Add the probe set to all futures of probe sets.  Handle aborting a probe set
@@ -779,7 +783,7 @@ async fn run_probe(
 ) -> Result<ProbeReport, ProbeError> {
     if !probe.delay().is_zero() {
         trace!("delaying probe");
-        tokio::time::sleep(probe.delay()).await;
+        crate::util::time::sleep(probe.delay()).await;
     }
     debug!("starting probe");
 

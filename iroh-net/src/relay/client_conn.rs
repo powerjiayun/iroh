@@ -131,29 +131,32 @@ impl ClientConnManager {
         // start io loop
         let io_done = done.clone();
         let io_client_id = client_id;
-        let io_handle = tokio::task::spawn(
-            async move {
-                let key = io_client_id.0;
-                let conn_num = io_client_id.1;
-                let res = conn_io.run(io_done).await;
-                let _ = server_channel
-                    .send(ServerMessage::RemoveClient((key, conn_num)))
-                    .await;
-                match res {
-                    Err(e) => {
-                        tracing::warn!(
-                            "connection manager for {key:?} {conn_num}: writer closed in error {e}"
-                        );
-                        Err(e)
-                    }
-                    Ok(_) => {
-                        tracing::warn!("connection manager for {key:?} {conn_num}: writer closed");
-                        Ok(())
-                    }
+        let fut = async move {
+            let key = io_client_id.0;
+            let conn_num = io_client_id.1;
+            let res = conn_io.run(io_done).await;
+            let _ = server_channel
+                .send(ServerMessage::RemoveClient((key, conn_num)))
+                .await;
+            match res {
+                Err(e) => {
+                    tracing::warn!(
+                        "connection manager for {key:?} {conn_num}: writer closed in error {e}"
+                    );
+                    Err(e)
+                }
+                Ok(_) => {
+                    tracing::warn!("connection manager for {key:?} {conn_num}: writer closed");
+                    Ok(())
                 }
             }
-            .instrument(tracing::debug_span!("conn_io")),
-        );
+        }
+        .instrument(tracing::debug_span!("conn_io"));
+
+        #[cfg(future = "native")]
+        let io_handle = tokio::task::spawn(fut);
+        #[cfg(not(future = "native"))]
+        let io_handle = tokio::task::spawn_local(fut);
 
         ClientConnManager {
             conn_num,
@@ -233,9 +236,9 @@ pub(crate) struct ClientConnIo {
 impl ClientConnIo {
     async fn run(mut self, done: CancellationToken) -> Result<()> {
         let jitter = Duration::from_secs(5);
-        let mut keep_alive = tokio::time::interval(KEEP_ALIVE + jitter);
+        let mut keep_alive = crate::util::time::interval(KEEP_ALIVE + jitter);
         // ticks immediately
-        keep_alive.tick().await;
+        keep_alive.next().await;
 
         loop {
             trace!("tick");
@@ -282,7 +285,7 @@ impl ClientConnIo {
                     // TODO: stats
                     // record `packet.enqueuedAt`
                 }
-                _ = keep_alive.tick() => {
+                _ = keep_alive.next() => {
                     trace!("keep alive");
                     self.send_keep_alive().await.context("send keep alive")?;
                 }
@@ -460,6 +463,7 @@ pub enum MaybeTlsStream {
     /// A Tls wrapped [`tokio::net::TcpStream`]
     #[cfg(feature = "native")]
     Tls(tokio_rustls::server::TlsStream<tokio::net::TcpStream>),
+    /// Placeholder for websocket
     Websocket,
     #[cfg(test)]
     Test(tokio::io::DuplexStream),

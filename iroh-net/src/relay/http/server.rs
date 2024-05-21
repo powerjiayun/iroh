@@ -23,7 +23,7 @@ use tracing::{debug, error, info, info_span, warn, Instrument};
 
 use crate::key::SecretKey;
 use crate::relay::http::HTTP_UPGRADE_PROTOCOL;
-use crate::relay::server::{ClientConnHandler, MaybeTlsStream};
+use crate::relay::server::ClientConnHandler;
 use crate::relay::MaybeTlsStreamServer;
 
 type BytesBody = http_body_util::Full<hyper::body::Bytes>;
@@ -46,8 +46,8 @@ fn body_full(content: impl Into<hyper::body::Bytes>) -> BytesBody {
     http_body_util::Full::new(content.into())
 }
 
-fn downcast_upgrade(upgraded: Upgraded) -> Result<(MaybeTlsStream, Bytes)> {
-    match upgraded.downcast::<hyper_util::rt::TokioIo<MaybeTlsStream>>() {
+fn downcast_upgrade(upgraded: Upgraded) -> Result<(MaybeTlsStreamServer, Bytes)> {
+    match upgraded.downcast::<hyper_util::rt::TokioIo<MaybeTlsStreamServer>>() {
         Ok(parts) => Ok((parts.io.into_inner(), parts.read_buf)),
         Err(_) => {
             bail!("could not downcast the upgraded connection to MaybeTlsStream")

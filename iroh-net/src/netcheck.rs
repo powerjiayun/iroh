@@ -15,7 +15,6 @@ use anyhow::{anyhow, Context as _, Result};
 use bytes::Bytes;
 use iroh_metrics::inc;
 use tokio::sync::{self, mpsc, oneshot};
-use tokio::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info_span, trace, warn, Instrument};
 
@@ -26,6 +25,7 @@ use crate::net::IpFamily;
 #[cfg(feature = "native")]
 use crate::net::UdpSocket;
 use crate::relay::RelayUrl;
+use crate::util::time::{Duration, Instant};
 use crate::util::CancelOnDrop;
 
 #[cfg(feature = "native")]

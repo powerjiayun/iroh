@@ -40,7 +40,6 @@ use smallvec::{smallvec, SmallVec};
 use tokio::{
     sync::{self, mpsc, Mutex},
     task::JoinSet,
-    time,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{
@@ -57,6 +56,7 @@ use crate::{
     netcheck,
     relay::{RelayMap, RelayUrl},
     stun,
+    util::time,
     util::watchable::{Watchable, Watcher},
     AddrInfo,
 };
@@ -1443,12 +1443,14 @@ impl Handle {
 
         let relay_actor = RelayActor::new(inner.clone(), actor_sender.clone());
         let relay_actor_cancel_token = relay_actor.cancel_token();
-        actor_tasks.spawn(
-            async move {
-                relay_actor.run(relay_actor_receiver).await;
-            }
-            .instrument(info_span!("relay-actor")),
-        );
+        let fut = async move {
+            relay_actor.run(relay_actor_receiver).await;
+        }
+        .instrument(info_span!("relay-actor"));
+        #[cfg(feature = "native")]
+        actor_tasks.spawn(fut);
+        #[cfg(not(feature = "native"))]
+        actor_tasks.spawn_local(fut);
 
         #[cfg(feature = "native")]
         let inner2 = inner.clone();
@@ -1464,37 +1466,39 @@ impl Handle {
         let inner2 = inner.clone();
         #[cfg(feature = "native")]
         let network_monitor = netmon::Monitor::new().await?;
-        actor_tasks.spawn(
-            async move {
-                let actor = Actor {
-                    msg_receiver: actor_receiver,
-                    msg_sender: actor_sender,
-                    relay_actor_sender,
-                    relay_actor_cancel_token,
-                    msock: inner2,
-                    relay_recv_sender,
-                    periodic_re_stun_timer: new_re_stun_timer(false),
-                    net_info_last: None,
-                    #[cfg(feature = "native")]
-                    nodes_path,
-                    #[cfg(feature = "native")]
-                    port_mapper,
-                    #[cfg(feature = "native")]
-                    pconn4,
-                    #[cfg(feature = "native")]
-                    pconn6,
-                    no_v4_send: false,
-                    net_checker,
-                    #[cfg(feature = "native")]
-                    network_monitor,
-                };
+        let fut = async move {
+            let actor = Actor {
+                msg_receiver: actor_receiver,
+                msg_sender: actor_sender,
+                relay_actor_sender,
+                relay_actor_cancel_token,
+                msock: inner2,
+                relay_recv_sender,
+                periodic_re_stun_timer: new_re_stun_timer(false),
+                net_info_last: None,
+                #[cfg(feature = "native")]
+                nodes_path,
+                #[cfg(feature = "native")]
+                port_mapper,
+                #[cfg(feature = "native")]
+                pconn4,
+                #[cfg(feature = "native")]
+                pconn6,
+                no_v4_send: false,
+                net_checker,
+                #[cfg(feature = "native")]
+                network_monitor,
+            };
 
-                if let Err(err) = actor.run().await {
-                    warn!("relay handler errored: {:?}", err);
-                }
+            if let Err(err) = actor.run().await {
+                warn!("relay handler errored: {:?}", err);
             }
-            .instrument(info_span!("actor")),
-        );
+        }
+        .instrument(info_span!("actor"));
+        #[cfg(feature = "native")]
+        actor_tasks.spawn(fut);
+        #[cfg(not(feature = "native"))]
+        actor_tasks.spawn_local(fut);
 
         let c = Handle {
             msock: inner,
@@ -1773,12 +1777,12 @@ impl Actor {
         let mut portmap_watcher = self.port_mapper.watch_external_address();
         #[cfg(feature = "native")]
         let mut save_nodes_timer = if self.nodes_path.is_some() {
-            tokio::time::interval_at(
+            crate::util::time::interval_at(
                 time::Instant::now() + SAVE_NODES_INTERVAL,
                 SAVE_NODES_INTERVAL,
             )
         } else {
-            tokio::time::interval(Duration::MAX)
+            crate::util::time::interval(Duration::MAX)
         };
 
         loop {
@@ -1790,11 +1794,11 @@ impl Actor {
                         return Ok(());
                     }
                 }
-                tick = self.periodic_re_stun_timer.tick() => {
+                tick = self.periodic_re_stun_timer.next() => {
                     trace!("tick: re_stun {:?}", tick);
                     self.msock.re_stun("periodic");
                 }
-                _ = endpoint_heartbeat_timer.tick() => {
+                _ = endpoint_heartbeat_timer.next() => {
                     trace!("tick: endpoint heartbeat {} endpoints", self.msock.node_map.node_count());
                     // TODO: this might trigger too many packets at once, pace this
 
@@ -1810,7 +1814,7 @@ impl Actor {
                         self.update_endpoints(reason).await;
                     }
                 }
-                _ = save_nodes_timer.tick(), if self.nodes_path.is_some() => {
+                _ = save_nodes_timer.next(), if self.nodes_path.is_some() => {
                     trace!("tick: nodes_timer");
                     let path = self.nodes_path.as_ref().expect("precondition: `is_some()`");
 
@@ -1842,11 +1846,11 @@ impl Actor {
                         return Ok(());
                     }
                 }
-                tick = self.periodic_re_stun_timer.tick() => {
-                    trace!("tick: re_stun {:?}", tick);
+                _ = self.periodic_re_stun_timer.next() => {
+                    trace!("tick: re_stun");
                     self.msock.re_stun("periodic");
                 }
-                _ = endpoint_heartbeat_timer.tick() => {
+                _ = endpoint_heartbeat_timer.next() => {
                     trace!("tick: endpoint heartbeat {} endpoints", self.msock.node_map.node_count());
                     // TODO: this might trigger too many packets at once, pace this
 
@@ -2287,7 +2291,7 @@ impl Actor {
         match channel.await {
             Ok(rx) => {
                 let msg_sender = self.msg_sender.clone();
-                tokio::task::spawn(async move {
+                let fut = async move {
                     let report = time::timeout(NETCHECK_REPORT_TIMEOUT, rx).await;
                     let report: anyhow::Result<_> = match report {
                         Ok(Ok(Ok(report))) => Ok(Some(report)),
@@ -2301,7 +2305,11 @@ impl Actor {
                         .ok();
                     // The receiver of the NetcheckReport message will call
                     // .finalize_endpoints_update().
-                });
+                };
+                #[cfg(feature = "native")]
+                tokio::task::spawn(fut);
+                #[cfg(not(feature = "native"))]
+                tokio::task::spawn_local(fut);
             }
             Err(err) => {
                 warn!("unable to start netcheck generation: {:?}", err);

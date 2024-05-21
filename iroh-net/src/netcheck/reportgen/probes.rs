@@ -9,12 +9,12 @@ use std::fmt;
 use std::sync::Arc;
 
 use anyhow::{ensure, Result};
-use tokio::time::Duration;
 
 #[cfg(feature = "native")]
 use crate::net::interfaces;
 use crate::netcheck::Report;
 use crate::relay::{RelayMap, RelayNode, RelayUrl};
+use crate::util::time::Duration;
 
 /// The retransmit interval used when netcheck first runs.
 ///

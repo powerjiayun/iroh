@@ -12,6 +12,66 @@ use futures_util::{future::Shared, FutureExt};
 
 pub mod watchable;
 
+/// Time related utilties.
+#[cfg(feature = "native")]
+pub(crate) mod time {
+    pub use tokio::time::{sleep, timeout, Duration, Instant};
+    pub use tokio_stream::wrappers::IntervalStream as Interval;
+
+    pub fn interval(dur: std::time::Duration) -> Interval {
+        let interval = tokio::time::interval(dur);
+        Interval::new(interval)
+    }
+
+    pub fn interval_at(start: Instant, dur: std::time::Duration) -> Interval {
+        let interval = tokio::time::interval_at(start, dur);
+        Interval::new(interval)
+    }
+}
+
+/// Time related utilties.
+#[cfg(all(not(feature = "native"), feature = "wasm"))]
+pub(crate) mod time {
+    pub use gloo_timers::future::{sleep, IntervalStream as Interval};
+    pub use web_time::{Duration, Instant};
+
+    /// Errors returned by `Timeout`.
+    ///
+    /// This error is returned when a timeout expires before the function was able
+    /// to finish.
+    #[derive(Debug, PartialEq, Eq)]
+    pub struct Elapsed(());
+    impl std::error::Error for Elapsed {}
+    impl std::fmt::Display for Elapsed {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Elapsed")
+        }
+    }
+
+    pub async fn timeout<T, F>(delay: std::time::Duration, fut: F) -> Result<T, Elapsed>
+    where
+        F: std::future::Future<Output = T>,
+    {
+        let mut sleep = sleep(delay);
+        tokio::select! {
+            _ = &mut sleep => {
+                Err(Elapsed(()))
+            }
+            res = fut => {
+                Ok(res)
+            }
+        }
+    }
+
+    pub fn interval(dur: std::time::Duration) -> Interval {
+        Interval::new(u32::try_from(dur.as_millis()).expect("interval too large"))
+    }
+
+    pub fn interval_at(start: Instant, dur: std::time::Duration) -> Interval {
+        todo!()
+    }
+}
+
 /// A join handle that owns the task it is running, and aborts it when dropped.
 #[derive(Debug, derive_more::Deref)]
 pub struct AbortingJoinHandle<T> {

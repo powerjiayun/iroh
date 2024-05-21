@@ -165,23 +165,24 @@ impl DiscoveryTask {
         let (on_first_tx, on_first_rx) = oneshot::channel();
         let ep = ep.clone();
         let me = ep.node_id();
-        let task = tokio::task::spawn(
-            async move {
-                // If delay is set, wait and recheck if discovery is needed. If not, early-exit.
-                if let Some(delay) = delay {
-                    tokio::time::sleep(delay).await;
-                    if !Self::needs_discovery(&ep, node_id) {
-                        debug!("no discovery needed, abort");
-                        on_first_tx.send(Ok(())).ok();
-                        return;
-                    }
+        let fut = async move {
+            // If delay is set, wait and recheck if discovery is needed. If not, early-exit.
+            if let Some(delay) = delay {
+                crate::util::time::sleep(delay).await;
+                if !Self::needs_discovery(&ep, node_id) {
+                    debug!("no discovery needed, abort");
+                    on_first_tx.send(Ok(())).ok();
+                    return;
                 }
-                Self::run(ep, node_id, on_first_tx).await
             }
-            .instrument(
-                error_span!("discovery", me = %me.fmt_short(), node = %node_id.fmt_short()),
-            ),
-        );
+            Self::run(ep, node_id, on_first_tx).await
+        }
+        .instrument(error_span!("discovery", me = %me.fmt_short(), node = %node_id.fmt_short()));
+        #[cfg(feature = "native")]
+        let task = tokio::task::spawn(fut);
+        #[cfg(not(feature = "native"))]
+        let task = tokio::task::spawn_local(fut);
+
         Ok(Some(Self { task, on_first_rx }))
     }
 

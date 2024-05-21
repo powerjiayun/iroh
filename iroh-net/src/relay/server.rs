@@ -27,6 +27,7 @@ use super::{
     },
     metrics::Metrics,
     types::ServerMessage,
+    MaybeTlsStreamServer,
 };
 
 // TODO: skipping `verboseDropKeys` for now
@@ -168,7 +169,7 @@ impl ClientConnHandler {
     /// and is unable to verify this one, or if there is some issue communicating with the server.
     ///
     /// The provided [`AsyncRead`] and [`AsyncWrite`] must be already connected to the connection.
-    pub async fn accept(&self, io: MaybeTlsStream) -> Result<()> {
+    pub async fn accept(&self, io: MaybeTlsStreamServer) -> Result<()> {
         let mut io = Framed::new(io, DerpCodec);
         trace!("accept: start");
         trace!("accept: recv client key");
@@ -368,7 +369,7 @@ mod tests {
             ClientConnBuilder {
                 key,
                 conn_num,
-                io: Framed::new(MaybeTlsStream::Test(io), DerpCodec),
+                io: Framed::new(MaybeTlsStreamServer::Test(io), DerpCodec),
                 write_timeout: None,
                 channel_capacity: 10,
                 server_channel,
@@ -476,7 +477,9 @@ mod tests {
         });
 
         // attempt to add the connection to the server
-        handler.accept(MaybeTlsStream::Test(server_io)).await?;
+        handler
+            .accept(MaybeTlsStreamServer::Test(server_io))
+            .await?;
         client_task.await??;
 
         // ensure we inform the server to create the client from the connection!
@@ -517,7 +520,7 @@ mod tests {
         let (rw_a, client_a_builder) = make_test_client(key_a);
         let handler = server.client_conn_handler(Default::default());
         let handler_task =
-            tokio::spawn(async move { handler.accept(MaybeTlsStream::Test(rw_a)).await });
+            tokio::spawn(async move { handler.accept(MaybeTlsStreamServer::Test(rw_a)).await });
         let (client_a, mut client_receiver_a) = client_a_builder.build().await?;
         handler_task.await??;
 
@@ -527,7 +530,7 @@ mod tests {
         let (rw_b, client_b_builder) = make_test_client(key_b);
         let handler = server.client_conn_handler(Default::default());
         let handler_task =
-            tokio::spawn(async move { handler.accept(MaybeTlsStream::Test(rw_b)).await });
+            tokio::spawn(async move { handler.accept(MaybeTlsStreamServer::Test(rw_b)).await });
         let (client_b, mut client_receiver_b) = client_b_builder.build().await?;
         handler_task.await??;
 
@@ -587,7 +590,7 @@ mod tests {
         let (rw_a, client_a_builder) = make_test_client(key_a);
         let handler = server.client_conn_handler(Default::default());
         let handler_task =
-            tokio::spawn(async move { handler.accept(MaybeTlsStream::Test(rw_a)).await });
+            tokio::spawn(async move { handler.accept(MaybeTlsStreamServer::Test(rw_a)).await });
         let (client_a, mut client_receiver_a) = client_a_builder.build().await?;
         handler_task.await??;
 
@@ -597,7 +600,7 @@ mod tests {
         let (rw_b, client_b_builder) = make_test_client(key_b.clone());
         let handler = server.client_conn_handler(Default::default());
         let handler_task =
-            tokio::spawn(async move { handler.accept(MaybeTlsStream::Test(rw_b)).await });
+            tokio::spawn(async move { handler.accept(MaybeTlsStreamServer::Test(rw_b)).await });
         let (client_b, mut client_receiver_b) = client_b_builder.build().await?;
         handler_task.await??;
 
@@ -631,7 +634,7 @@ mod tests {
         let (new_rw_b, new_client_b_builder) = make_test_client(key_b);
         let handler = server.client_conn_handler(Default::default());
         let handler_task =
-            tokio::spawn(async move { handler.accept(MaybeTlsStream::Test(new_rw_b)).await });
+            tokio::spawn(async move { handler.accept(MaybeTlsStreamServer::Test(new_rw_b)).await });
         let (new_client_b, mut new_client_receiver_b) = new_client_b_builder.build().await?;
         handler_task.await??;
 

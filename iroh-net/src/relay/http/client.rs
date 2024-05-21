@@ -17,7 +17,6 @@ use rustls::client::Resumption;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
-use tokio::time::Instant;
 use tracing::{debug, error, info_span, trace, warn, Instrument};
 use url::Url;
 
@@ -29,6 +28,7 @@ use crate::relay::{
     client::Client as RelayClient, client::ClientBuilder as RelayClientBuilder,
     client::ClientReceiver as RelayClientReceiver, ReceivedMessage,
 };
+use crate::util::time::Instant;
 use crate::util::AbortingJoinHandle;
 
 const DIAL_NODE_TIMEOUT: Duration = Duration::from_millis(1500);
@@ -326,9 +326,12 @@ impl ClientBuilder {
 
         let (msg_sender, inbox) = mpsc::channel(64);
         let (s, r) = mpsc::channel(64);
-        let recv_loop = tokio::task::spawn(
-            async move { inner.run(inbox, s).await }.instrument(info_span!("client")),
-        );
+        let fut = async move { inner.run(inbox, s).await }.instrument(info_span!("client"));
+
+        #[cfg(feature = "native")]
+        let recv_loop = tokio::task::spawn(fut);
+        #[cfg(not(feature = "native"))]
+        let recv_loop = tokio::task::spawn_local(fut);
 
         (
             Client {
@@ -543,7 +546,7 @@ impl Actor {
             if self.relay_client.is_none() {
                 trace!("no connection, trying to connect");
                 let (relay_client, receiver) =
-                    tokio::time::timeout(CONNECT_TIMEOUT, self.connect_0())
+                    crate::util::time::timeout(CONNECT_TIMEOUT, self.connect_0())
                         .await
                         .map_err(|_| ClientError::ConnectTimeout)??;
 
@@ -702,7 +705,7 @@ impl Actor {
         let (ping, recv) = self.pings.register();
         trace!("ping: {}", hex::encode(ping));
 
-        self.ping_tasks.spawn(async move {
+        let fut = async move {
             let res = match connect_res {
                 Ok(client) => {
                     let start = Instant::now();
@@ -710,7 +713,7 @@ impl Actor {
                         warn!("failed to send ping: {:?}", err);
                         Err(ClientError::Send)
                     } else {
-                        match tokio::time::timeout(PING_TIMEOUT, recv).await {
+                        match crate::util::time::timeout(PING_TIMEOUT, recv).await {
                             Ok(Ok(())) => Ok(start.elapsed()),
                             Err(_) => Err(ClientError::PingTimeout),
                             Ok(Err(_)) => Err(ClientError::PingAborted),
@@ -720,7 +723,11 @@ impl Actor {
                 Err(err) => Err(err),
             };
             s.send(res).ok();
-        });
+        };
+        #[cfg(feature = "native")]
+        self.ping_tasks.spawn(fut);
+        #[cfg(not(feature = "native"))]
+        self.ping_tasks.spawn_local(fut);
     }
 
     async fn send(&mut self, dst_key: PublicKey, b: Bytes) -> Result<(), ClientError> {
@@ -797,7 +804,7 @@ impl Actor {
     }
 
     #[cfg(feature = "native")]
-    async fn dial_url(&self) -> Result<TcpStream, ClientError> {
+    async fn dial_url(&self) -> Result<tokio::net::TcpStream, ClientError> {
         debug!(%self.url, "dial url");
         use tokio::net::TcpStream;
 

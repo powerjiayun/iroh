@@ -12,6 +12,9 @@ keywords = ["quic", "networking", "holepunching", "p2p"]
 # Sadly this also needs to be updated in .github/workflows/ci.yml
 rust-version = "1.75"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [lints]
 workspace = true
 
@@ -63,8 +66,9 @@ stun-rs = "0.1.5"
 surge-ping = { version = "0.8.0", optional = true }
 thiserror = "1"
 time = "0.3.20"
-tokio = { version = "1", features = ["io-util", "macros", "sync", "rt", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "sync", "rt"] }
 tokio-rustls = { version = "0.24" }
+tokio-stream = { version = "0.1", optional = true, features = ["time"] }
 tokio-util = { version = "0.7", features = ["io-util", "io", "codec"] }
 tracing = "0.1"
 url = { version = "2.4", features = ["serde"] }
@@ -85,6 +89,10 @@ tokio-rustls-acme = { version = "0.3", optional = true }
 # metrics
 iroh-metrics = { version = "0.16.0", path = "../iroh-metrics", default-features = false }
 strum = { version = "0.26.2", features = ["derive"] }
+
+# wasm
+gloo-timers = { version = "0.3", optional = true, features = ["futures"] }
+web-time = { version = "1", optional = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 netlink-packet-core = "0.7.0"
@@ -119,7 +127,7 @@ harness = false
 duct = "0.13.6"
 
 [features]
-default = ["metrics", "quinn/runtime-tokio"] # , "native"]
+default = ["metrics", "quinn/runtime-tokio", "native"]
 iroh-relay = [
   "dep:clap",
   "dep:toml",
@@ -137,6 +145,7 @@ native = [
   "tokio/net",
   "tokio/fs",
   "tokio/io-std",
+  "tokio/time",
   "dep:socket2",
   "dep:libc",
   "dep:netdev",
@@ -146,13 +155,16 @@ native = [
   "dep:pkarr",
   "dep:surge-ping",
   "quinn/runtime-tokio",
+  "dep:tokio-stream"
 ]
 wasm = [
   "ring/wasm32_unknown_unknown_js",
   "quinn/wasm",
   "quinn/runtime-wasm",
   "quinn-proto/wasm",
-  "iroh-base/wasm"
+  "iroh-base/wasm",
+  "dep:gloo-timers",
+  "dep:web-time"
 ]
 
 [[bin]]

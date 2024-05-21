@@ -3,17 +3,16 @@ use std::{
     future::Future,
     net::{IpAddr, SocketAddr},
     sync::{atomic::Ordering, Arc},
-    time::{Duration, Instant},
 };
 
 use anyhow::Context;
 use backoff::backoff::Backoff;
 use bytes::{Bytes, BytesMut};
+use futures_lite::StreamExt;
 use iroh_metrics::{inc, inc_by};
 use tokio::{
     sync::{mpsc, oneshot},
     task::{JoinHandle, JoinSet},
-    time,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, info_span, trace, warn, Instrument};
@@ -21,6 +20,7 @@ use tracing::{debug, info, info_span, trace, warn, Instrument};
 use crate::{
     key::{PublicKey, PUBLIC_KEY_LENGTH},
     relay::{self, http::ClientError, ReceivedMessage, RelayUrl, MAX_PACKET_SIZE},
+    util::time::{self, Duration, Instant},
 };
 
 use super::{ActorMessage, MagicSock};
@@ -324,7 +324,7 @@ impl RelayActor {
                 Some(msg) = receiver.recv() => {
                     with_cancel(self.cancel_token.child_token(), self.handle_msg(msg)).await;
                 }
-                _ = cleanup_timer.tick() => {
+                _ = cleanup_timer.next() => {
                     trace!("tick: cleanup");
                     with_cancel(self.cancel_token.child_token(), self.clean_stale_relay()).await;
                 }
@@ -501,16 +501,18 @@ impl RelayActor {
         let c = dc.clone();
         let msg_sender = self.msg_sender.clone();
         let url1 = url.clone();
-        let handle = tokio::task::spawn(
-            async move {
-                let ad = ActiveRelay::new(url1, c, dc_receiver, msg_sender);
+        let fut = async move {
+            let ad = ActiveRelay::new(url1, c, dc_receiver, msg_sender);
 
-                if let Err(err) = ad.run(r).await {
-                    warn!("connection error: {:?}", err);
-                }
+            if let Err(err) = ad.run(r).await {
+                warn!("connection error: {:?}", err);
             }
-            .instrument(info_span!("active-relay", %url)),
-        );
+        }
+        .instrument(info_span!("active-relay", %url));
+        #[cfg(feature = "native")]
+        let handle = tokio::task::spawn(fut);
+        #[cfg(not(feature = "native"))]
+        let handle = tokio::task::spawn_local(fut);
 
         // Insert, to make sure we do not attempt to double connect.
         self.active_relay.insert(url.clone(), (s, handle));
@@ -563,7 +565,7 @@ impl RelayActor {
                 .send_to_active(&url, ActiveRelayMessage::Ping(os))
                 .await;
 
-            self.ping_tasks.spawn(async move {
+            let fut = async move {
                 let ping_success = time::timeout(Duration::from_secs(3), async {
                     if ping_sent {
                         or.await.is_ok()
@@ -575,7 +577,11 @@ impl RelayActor {
                 .unwrap_or(false);
 
                 (url, ping_success)
-            });
+            };
+            #[cfg(feature = "native")]
+            self.ping_tasks.spawn(fut);
+            #[cfg(not(feature = "native"))]
+            self.ping_tasks.spawn_local(fut);
         }
 
         for (url, why) in tasks {

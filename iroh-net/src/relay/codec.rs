@@ -121,7 +121,7 @@ pub(super) async fn write_frame<S: Sink<Frame, Error = std::io::Error> + Unpin>(
     timeout: Option<Duration>,
 ) -> anyhow::Result<()> {
     if let Some(duration) = timeout {
-        tokio::time::timeout(duration, writer.send(frame)).await??;
+        crate::util::time::timeout(duration, writer.send(frame)).await??;
     } else {
         writer.send(frame).await?;
     }
@@ -161,7 +161,7 @@ pub(super) async fn recv_client_key<S: Stream<Item = anyhow::Result<Frame>> + Un
     // maximum frame size, and give a timeout
 
     // TODO: variable recv size: 256 * 1024
-    let buf = tokio::time::timeout(
+    let buf = crate::util::time::timeout(
         Duration::from_secs(10),
         recv_frame(FrameType::ClientInfo, stream),
     )
