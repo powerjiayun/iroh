@@ -6,15 +6,20 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use anyhow::{bail, Context as _, Result};
+use bytes::{Buf, Bytes};
+use futures_sink::Sink;
+use futures_util::Stream;
 use hyper::HeaderMap;
 use iroh_metrics::core::UsageStatsReport;
 use iroh_metrics::{inc, report_usage_stats};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio_tungstenite::WebSocketStream;
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
 use tracing::{info_span, trace, Instrument};
+use tungstenite::Message;
 
 use crate::key::{PublicKey, SecretKey};
 
@@ -340,6 +345,131 @@ fn init_meta_cert(server_key: &PublicKey) -> Vec<u8> {
         .expect("fixed inputs")
         .serialize_der()
         .expect("fixed allocations")
+}
+
+/// Websocket or raw.
+#[derive(Debug)]
+pub enum MaybeWsStream {
+    Ws(WebSocketStream<MaybeTlsStream>, Option<Bytes>),
+    Relay(MaybeTlsStream),
+}
+
+impl AsyncRead for MaybeWsStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            Self::Ws(ref mut s, ref mut chunk) => {
+                if buf.remaining() == 0 {
+                    return Poll::Ready(Ok(()));
+                }
+
+                let inner_buf = match poll_fill_buf_ws(s, chunk, cx) {
+                    Poll::Ready(Ok(buf)) => buf,
+                    Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+                    Poll::Pending => return Poll::Pending,
+                };
+                let len = std::cmp::min(inner_buf.len(), buf.remaining());
+                buf.put_slice(&inner_buf[..len]);
+
+                consume_ws(chunk, len);
+                Poll::Ready(Ok(()))
+            }
+            Self::Relay(ref mut s) => Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+fn poll_fill_buf_ws<'a>(
+    s: &mut WebSocketStream<MaybeTlsStream>,
+    chunk: &'a mut Option<Bytes>,
+    cx: &mut Context<'_>,
+) -> Poll<std::io::Result<&'a [u8]>> {
+    loop {
+        if chunk.is_some() {
+            // This unwrap is very sad, but it can't be avoided.
+            let buf = chunk.as_ref().unwrap().chunk();
+            return Poll::Ready(Ok(buf));
+        } else {
+            match Pin::new(&mut *s).poll_next(cx) {
+                Poll::Ready(Some(Ok(msg))) => {
+                    // Go around the loop in case the chunk is empty.
+                    match msg {
+                        Message::Binary(data) => {
+                            *chunk = Some(data.into());
+                        }
+                        _ => {
+                            todo!();
+                        }
+                    }
+                }
+                Poll::Ready(Some(Err(err))) => {
+                    return Poll::Ready(Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        err.to_string(),
+                    )))
+                }
+                Poll::Ready(None) => return Poll::Ready(Ok(&[])),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
+fn consume_ws(chunk: &mut Option<Bytes>, amt: usize) {
+    if amt > 0 {
+        chunk.as_mut().expect("No chunk present").advance(amt);
+    }
+}
+
+impl AsyncWrite for MaybeWsStream {
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<std::result::Result<(), std::io::Error>> {
+        match &mut *self {
+            Self::Ws(ref mut s, _) => Pin::new(s)
+                .poll_flush(cx)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+            Self::Relay(ref mut s) => Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<std::result::Result<(), std::io::Error>> {
+        match &mut *self {
+            Self::Ws(ref mut s, _) => Pin::new(s)
+                .poll_close(cx)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+            Self::Relay(ref mut s) => Pin::new(s).poll_shutdown(cx),
+        }
+    }
+
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::result::Result<usize, std::io::Error>> {
+        match &mut *self {
+            Self::Ws(ref mut s, _) => {
+                std::task::ready!(Pin::new(&mut *s)
+                    .poll_ready(cx)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+                match Pin::new(s).start_send(Message::Binary(buf.to_vec())) {
+                    Ok(()) => Poll::Ready(Ok(buf.len())),
+                    Err(e) => Poll::Ready(Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    ))),
+                }
+            }
+            Self::Relay(ref mut s) => Pin::new(s).poll_write(cx, buf),
+        }
+    }
 }
 
 /// Whether or not the underlying [`tokio::net::TcpStream`] is served over Tls

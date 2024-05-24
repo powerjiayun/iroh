@@ -18,7 +18,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio_rustls_acme::AcmeAcceptor;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, info_span, warn, Instrument};
+use tracing::{debug, debug_span, error, info, info_span, warn, Instrument};
+use tungstenite::handshake::derive_accept_key;
 
 use crate::key::SecretKey;
 use crate::relay::http::HTTP_UPGRADE_PROTOCOL;
@@ -52,22 +53,6 @@ fn downcast_upgrade(upgraded: Upgraded) -> Result<(MaybeTlsStream, Bytes)> {
             bail!("could not downcast the upgraded connection to MaybeTlsStream")
         }
     }
-}
-
-/// The server HTTP handler to do HTTP upgrades
-async fn relay_connection_handler(
-    conn_handler: &ClientConnHandler,
-    upgraded: Upgraded,
-) -> Result<()> {
-    debug!("relay_connection upgraded");
-    let (io, read_buf) = downcast_upgrade(upgraded)?;
-    ensure!(
-        read_buf.is_empty(),
-        "can not deal with buffered data yet: {:?}",
-        read_buf
-    );
-
-    conn_handler.accept(io).await
 }
 
 /// A Relay Server handler. Created using [`ServerBuilder::spawn`], it starts a relay server
@@ -333,6 +318,37 @@ impl ServerState {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum Protocol {
+    Relay,
+    Websocket,
+}
+
+impl Protocol {
+    const fn upgrade_header(&self) -> &'static str {
+        match self {
+            Protocol::Relay => HTTP_UPGRADE_PROTOCOL,
+            Protocol::Websocket => "websocket",
+        }
+    }
+    /// The server HTTP handler to do HTTP upgrades
+    async fn relay_connection_handler(
+        &self,
+        conn_handler: &ClientConnHandler,
+        upgraded: Upgraded,
+    ) -> Result<()> {
+        debug!("relay_connection upgraded");
+        let (io, read_buf) = downcast_upgrade(upgraded)?;
+        ensure!(
+            read_buf.is_empty(),
+            "can not deal with buffered data yet: {:?}",
+            read_buf
+        );
+
+        conn_handler.accept(io).await
+    }
+}
+
 impl Service<Request<Incoming>> for ClientConnHandler {
     type Response = Response<BytesBody>;
     type Error = hyper::Error;
@@ -347,51 +363,91 @@ impl Service<Request<Incoming>> for ClientConnHandler {
         }
 
         async move {
-            {
-                let mut res = builder.body(body_empty()).expect("valid body");
+            // Send a 400 to any request that doesn't have an `Upgrade` header.
+            let Some(upgrade) = req.headers().get(UPGRADE) else {
+                return Ok(builder
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(body_empty())
+                    .expect("valid body"));
+            };
 
-                // Send a 400 to any request that doesn't have an `Upgrade` header.
-                if !req.headers().contains_key(UPGRADE) {
-                    *res.status_mut() = StatusCode::BAD_REQUEST;
-                    return Ok(res);
-                }
+            // Check for the correct protocol
+            let protocol = if upgrade == Protocol::Relay.upgrade_header().as_bytes() {
+                Protocol::Relay
+            } else if upgrade == Protocol::Websocket.upgrade_header().as_bytes() {
+                Protocol::Websocket
+            } else {
+                warn!("unexpected upgrade: {:?}", upgrade);
+                return Ok(builder
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(body_empty())
+                    .expect("valid body"));
+            };
+            let key = req.headers().get("Sec-WebSocket-Key").cloned();
+            let version = req.headers().get("Sec-WebSocket-Version").cloned();
 
-                // Setup a future that will eventually receive the upgraded
-                // connection and talk a new protocol, and spawn the future
-                // into the runtime.
-                //
-                // Note: This can't possibly be fulfilled until the 101 response
-                // is returned below, so it's better to spawn this future instead
-                // waiting for it to complete to then return a response.
-                tokio::task::spawn(
-                    async move {
-                        match hyper::upgrade::on(&mut req).await {
-                            Ok(upgraded) => {
-                                if let Err(e) =
-                                    relay_connection_handler(&closure_conn_handler, upgraded).await
-                                {
-                                    tracing::warn!(
-                                        "upgrade to \"{HTTP_UPGRADE_PROTOCOL}\": io error: {:?}",
-                                        e
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        "upgrade to \"{HTTP_UPGRADE_PROTOCOL}\" success"
-                                    );
-                                };
-                            }
-                            Err(e) => tracing::warn!("upgrade error: {:?}", e),
-                        }
+            match protocol {
+                Protocol::Websocket => {
+                    if key.is_none() {
+                        warn!("missing websocket key");
+                        return Ok(builder
+                            .status(StatusCode::BAD_REQUEST)
+                            .body(body_empty())
+                            .expect("valid body"));
                     }
-                    .instrument(tracing::debug_span!("handler")),
-                );
+                    if version.as_ref().map(|v| v.as_bytes()) != Some(b"13") {
+                        warn!("invalid websocket version: {:?}", version);
+                        return Ok(builder
+                            .status(StatusCode::BAD_REQUEST)
+                            .body(body_empty())
+                            .expect("valid body"));
+                    }
+                }
+                Protocol::Relay => {}
+            }
 
-                // Now return a 101 Response saying we agree to the upgrade to the
-                // HTTP_UPGRADE_PROTOCOL
-                *res.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
-                res.headers_mut()
-                    .insert(UPGRADE, HeaderValue::from_static(HTTP_UPGRADE_PROTOCOL));
-                Ok(res)
+            debug!("upgrading protocol: {:?}", protocol);
+
+            tokio::task::spawn(
+                async move {
+                    match hyper::upgrade::on(&mut req).await {
+                        Ok(upgraded) => {
+                            if let Err(e) = protocol
+                                .relay_connection_handler(&closure_conn_handler, upgraded)
+                                .await
+                            {
+                                warn!("upgrade to \"{:?}\": io error: {:?}", protocol, e);
+                            } else {
+                                debug!("upgrade to \"{:?}\" success", protocol);
+                            }
+                        }
+                        Err(e) => warn!("upgrade error: {:?}", e),
+                    }
+                }
+                .instrument(debug_span!("handler")),
+            );
+
+            // Now return a 101 Response saying we agree to the upgrade to the
+            // HTTP_UPGRADE_PROTOCOL
+            builder = builder
+                .status(StatusCode::SWITCHING_PROTOCOLS)
+                .header(UPGRADE, HeaderValue::from_static(protocol.upgrade_header()));
+
+            match protocol {
+                Protocol::Websocket => {
+                    let key = key.expect("already checked");
+                    // Add websocket specific reply headers
+                    builder =
+                        builder.header("Sec-WebSocket-Accept", &derive_accept_key(key.as_bytes()));
+                    let res = builder
+                        .body(body_full("switching to websocket protocol"))
+                        .expect("valid body");
+                    Ok(res)
+                }
+                Protocol::Relay => {
+                    let res = builder.body(body_empty()).expect("valid body");
+                    Ok(res)
+                }
             }
         }
         .boxed()
