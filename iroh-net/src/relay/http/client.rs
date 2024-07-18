@@ -36,8 +36,8 @@ use crate::relay::{
     client::Client as RelayClient, client::ClientBuilder as RelayClientBuilder,
     client::ClientReceiver as RelayClientReceiver, ReceivedMessage,
 };
-use crate::util::chain;
 use crate::util::AbortingJoinHandle;
+use crate::util::{chain, time};
 
 use super::streams::ProxyStream;
 use super::Protocol;
@@ -360,9 +360,8 @@ impl ClientBuilder {
 
         let (msg_sender, inbox) = mpsc::channel(64);
         let (s, r) = mpsc::channel(64);
-        let recv_loop = tokio::task::spawn(
-            async move { inner.run(inbox, s).await }.instrument(info_span!("client")),
-        );
+        let recv_loop =
+            task::spawn(async move { inner.run(inbox, s).await }.instrument(info_span!("client")));
 
         (
             Client {
@@ -576,10 +575,9 @@ impl Actor {
         async move {
             if self.relay_client.is_none() {
                 trace!("no connection, trying to connect");
-                let (relay_client, receiver) =
-                    tokio::time::timeout(CONNECT_TIMEOUT, self.connect_0())
-                        .await
-                        .map_err(|_| ClientError::ConnectTimeout)??;
+                let (relay_client, receiver) = time::timeout(CONNECT_TIMEOUT, self.connect_0())
+                    .await
+                    .map_err(|_| ClientError::ConnectTimeout)??;
 
                 self.relay_client = Some((relay_client.clone(), receiver));
                 self.next_conn();
@@ -607,8 +605,15 @@ impl Actor {
                 (reader, writer, local_addr)
             }
             Protocol::Relay => {
-                let (reader, writer, local_addr) = self.connect_derp().await?;
-                (reader, writer, Some(local_addr))
+                #[cfg(feature = "native")]
+                {
+                    let (reader, writer, local_addr) = self.connect_derp().await?;
+                    (reader, writer, Some(local_addr))
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    panic!("Cannot connect using derp protocol in wasm") // TODO(matheus23): Maybe improve this
+                }
             }
         };
 
@@ -653,6 +658,7 @@ impl Actor {
         Ok((reader, writer))
     }
 
+    #[cfg(feature = "native")]
     async fn connect_derp(&self) -> Result<(ConnReader, ConnWriter, SocketAddr), ClientError> {
         let tcp_stream = self.dial_url().await?;
 
@@ -779,7 +785,7 @@ impl Actor {
                         warn!("failed to send ping: {:?}", err);
                         Err(ClientError::Send)
                     } else {
-                        match tokio::time::timeout(PING_TIMEOUT, recv).await {
+                        match time::timeout(PING_TIMEOUT, recv).await {
                             Ok(Ok(())) => Ok(start.elapsed()),
                             Err(_) => Err(ClientError::PingTimeout),
                             Ok(Err(_)) => Err(ClientError::PingAborted),
@@ -855,6 +861,7 @@ impl Actor {
         }
     }
 
+    #[cfg(feature = "native")]
     async fn dial_url(&self) -> Result<ProxyStream, ClientError> {
         if let Some(ref proxy) = self.proxy_url {
             let stream = self.dial_url_proxy(proxy.clone()).await?;
@@ -865,6 +872,7 @@ impl Actor {
         }
     }
 
+    #[cfg(feature = "native")]
     async fn dial_url_direct(&self) -> Result<TcpStream, ClientError> {
         debug!(%self.url, "dial url");
         let prefer_ipv6 = self.prefer_ipv6().await;
@@ -875,20 +883,20 @@ impl Actor {
         let addr = SocketAddr::new(dst_ip, port);
 
         debug!("connecting to {}", addr);
-        let tcp_stream =
-            tokio::time::timeout(
-                DIAL_NODE_TIMEOUT,
-                async move { TcpStream::connect(addr).await },
-            )
-            .await
-            .map_err(|_| ClientError::ConnectTimeout)?
-            .map_err(ClientError::DialIO)?;
+        let tcp_stream = time::timeout(
+            DIAL_NODE_TIMEOUT,
+            async move { TcpStream::connect(addr).await },
+        )
+        .await
+        .map_err(|_| ClientError::ConnectTimeout)?
+        .map_err(ClientError::DialIO)?;
 
         tcp_stream.set_nodelay(true)?;
 
         Ok(tcp_stream)
     }
 
+    #[cfg(feature = "native")]
     async fn dial_url_proxy(
         &self,
         proxy_url: Url,
@@ -905,7 +913,7 @@ impl Actor {
 
         debug!(%proxy_addr, "connecting to proxy");
 
-        let tcp_stream = tokio::time::timeout(DIAL_NODE_TIMEOUT, async move {
+        let tcp_stream = time::timeout(DIAL_NODE_TIMEOUT, async move {
             TcpStream::connect(proxy_addr).await
         })
         .await

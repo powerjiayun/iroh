@@ -116,18 +116,24 @@
 
 #![recursion_limit = "256"]
 #![deny(missing_docs, rustdoc::broken_intra_doc_links)]
+#![allow(unused)]
 
 pub mod defaults;
 pub mod dialer;
 mod disco;
 pub mod discovery;
+#[cfg(feature = "native")]
 pub mod dns;
 pub mod endpoint;
 mod magicsock;
 pub mod metrics;
+#[cfg(feature = "native")]
 pub mod net;
+#[cfg(feature = "native")]
 pub mod netcheck;
+#[cfg(feature = "native")]
 pub mod ping;
+#[cfg(feature = "native")]
 pub mod portmapper;
 pub mod relay;
 pub mod stun;

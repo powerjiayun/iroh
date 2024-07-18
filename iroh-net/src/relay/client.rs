@@ -27,7 +27,7 @@ use super::{
 };
 
 use crate::key::{PublicKey, SecretKey};
-use crate::util::AbortingJoinHandle;
+use crate::util::{task, time, AbortingJoinHandle};
 
 const CLIENT_RECV_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -369,7 +369,7 @@ impl ClientBuilder {
 
         // create task to handle writing to the server
         let (writer_sender, writer_recv) = mpsc::channel(PER_CLIENT_SEND_QUEUE_DEPTH);
-        let writer_task = tokio::task::spawn(
+        let writer_task = task::spawn(
             async move {
                 let client_writer = ClientWriter {
                     rate_limiter,
@@ -384,9 +384,9 @@ impl ClientBuilder {
 
         let (reader_sender, reader_recv) = mpsc::channel(PER_CLIENT_READ_QUEUE_DEPTH);
         let writer_sender2 = writer_sender.clone();
-        let reader_task = tokio::task::spawn(async move {
+        let reader_task = task::spawn(async move {
             loop {
-                let frame = tokio::time::timeout(CLIENT_RECV_TIMEOUT, self.reader.next()).await;
+                let frame = time::timeout(CLIENT_RECV_TIMEOUT, self.reader.next()).await;
                 let res = match frame {
                     Ok(Some(Ok(frame))) => process_incoming_frame(frame),
                     Ok(Some(Err(err))) => {

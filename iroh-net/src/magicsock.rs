@@ -48,7 +48,6 @@ use tracing::{
     Instrument, Level, Span,
 };
 use url::Url;
-use watchable::Watchable;
 
 use crate::{
     disco::{self, SendAddr},
@@ -59,20 +58,24 @@ use crate::{
     net::{interfaces, ip::LocalAddresses, netmon, IpFamily},
     netcheck, portmapper,
     relay::{RelayMap, RelayUrl},
-    stun, AddrInfo,
+    stun,
+    util::watchable::{Watchable, Watcher},
+    AddrInfo,
 };
 
+#[cfg(feature = "native")]
+use self::udp_conn::UdpConn;
 use self::{
     metrics::Metrics as MagicsockMetrics,
     node_map::{NodeMap, PingAction, PingRole, SendPing},
     relay_actor::{RelayActor, RelayActorMessage, RelayReadResult},
-    udp_conn::UdpConn,
 };
 
 mod metrics;
 mod node_map;
 mod relay_actor;
 mod timer;
+#[cfg(feature = "native")]
 mod udp_conn;
 
 pub use self::metrics::Metrics;
@@ -252,7 +255,7 @@ impl MagicSock {
     ///
     /// If `None`, then we are not connected to any relay nodes.
     pub(crate) fn my_relay(&self) -> Option<RelayUrl> {
-        self.my_relay.get()
+        self.my_relay.get().clone()
     }
 
     /// Get the current proxy configuration.
@@ -264,7 +267,7 @@ impl MagicSock {
     ///
     /// If we are not connected to any relay nodes, set this to `None`.
     fn set_my_relay(&self, my_relay: Option<RelayUrl>) -> Option<RelayUrl> {
-        self.my_relay.replace(my_relay)
+        self.my_relay.set(my_relay).flatten()
     }
 
     fn is_closing(&self) -> bool {
@@ -317,8 +320,7 @@ impl MagicSock {
     /// received.
     pub(crate) fn direct_addresses(&self) -> DirectAddrsStream {
         DirectAddrsStream {
-            initial: Some(self.endpoints.get()),
-            inner: self.endpoints.watch().into_stream(),
+            inner: self.endpoints.watch_initial(),
         }
     }
 
@@ -327,13 +329,9 @@ impl MagicSock {
     /// Note that this can be used to wait for the initial home relay to be known. If the home
     /// relay is known at this point, it will be the first item in the stream.
     pub(crate) fn watch_home_relay(&self) -> impl Stream<Item = RelayUrl> {
-        let current = futures_lite::stream::iter(self.my_relay());
-        let changes = self
-            .my_relay
-            .watch()
-            .into_stream()
-            .filter_map(|maybe_relay| maybe_relay);
-        current.chain(changes)
+        self.my_relay
+            .watch_initial()
+            .filter_map(|maybe_relay| maybe_relay)
     }
 
     /// Returns a stream that reports the [`ConnectionType`] we have to the
@@ -366,7 +364,7 @@ impl MagicSock {
     /// Add addresses for a node to the magic socket's addresbook.
     #[instrument(skip_all, fields(me = %self.me))]
     pub fn add_node_addr(&self, mut addr: NodeAddr, source: node_map::Source) -> Result<()> {
-        let my_addresses = self.endpoints.get().last_endpoints;
+        let my_addresses = self.endpoints.get().last_endpoints.clone();
         let mut pruned = 0;
         for my_addr in my_addresses.into_iter().map(|ep| ep.addr) {
             if addr.info.direct_addresses.remove(&my_addr) {
@@ -390,9 +388,9 @@ impl MagicSock {
     ///
     /// On a successful update, our address is published to discovery.
     pub(super) fn update_direct_addresses(&self, eps: Vec<DirectAddr>) {
-        let updated = self.endpoints.update(DiscoveredEndpoints::new(eps)).is_ok();
+        let updated = self.endpoints.set(DiscoveredEndpoints::new(eps)).is_some();
         if updated {
-            let eps = self.endpoints.read();
+            let eps = self.endpoints.get();
             eps.log_endpoint_change();
             self.node_map
                 .on_direct_addr_discovered(eps.iter().map(|ep| ep.addr));
@@ -1187,7 +1185,7 @@ impl MagicSock {
     }
 
     fn send_queued_call_me_maybes(&self) {
-        let msg = self.endpoints.read().to_call_me_maybe_message();
+        let msg = self.endpoints.get().to_call_me_maybe_message();
         let msg = disco::Message::CallMeMaybe(msg);
         for (public_key, url) in self.pending_call_me_maybes.lock().drain() {
             if !self.send_disco_message_relay(&url, public_key, msg.clone()) {
@@ -1197,7 +1195,7 @@ impl MagicSock {
     }
 
     fn send_or_queue_call_me_maybe(&self, url: &RelayUrl, dst_node: NodeId) {
-        let endpoints = self.endpoints.read();
+        let endpoints = self.endpoints.get();
         if endpoints.fresh_enough() {
             let addrs: Vec<_> = endpoints.iter().collect();
             event!(
@@ -1240,7 +1238,7 @@ impl MagicSock {
     /// Called whenever our addresses or home relay node changes.
     fn publish_my_addr(&self) {
         if let Some(ref discovery) = self.discovery {
-            let eps = self.endpoints.read();
+            let eps = self.endpoints.get().clone();
             let relay_url = self.my_relay();
             let direct_addresses = eps.iter().map(|ep| ep.addr).collect();
             let info = AddrInfo {
@@ -1362,6 +1360,7 @@ impl Handle {
     }
 
     async fn with_name(me: String, opts: Options) -> Result<Self> {
+        #[cfg(feature = "native")]
         let port_mapper = portmapper::Client::default();
 
         let Options {
@@ -1378,19 +1377,25 @@ impl Handle {
 
         let (relay_recv_sender, relay_recv_receiver) = flume::bounded(128);
 
+        #[cfg(feature = "native")]
         let (pconn4, pconn6) = bind(port)?;
+        #[cfg(feature = "native")]
         let port = pconn4.port();
 
         // NOTE: we can end up with a zero port if `std::net::UdpSocket::socket_addr` fails
+        #[cfg(feature = "native")]
         match port.try_into() {
             Ok(non_zero_port) => {
                 port_mapper.update_local_port(non_zero_port);
             }
             Err(_zero_port) => debug!("Skipping port mapping with zero local port"),
         }
+        #[cfg(feature = "native")]
         let ipv4_addr = pconn4.local_addr()?;
+        #[cfg(feature = "native")]
         let ipv6_addr = pconn6.as_ref().and_then(|c| c.local_addr().ok());
 
+        #[cfg(feature = "native")]
         let net_checker = netcheck::Client::new(Some(port_mapper.clone()), dns_resolver.clone())?;
 
         let (actor_sender, actor_receiver) = mpsc::channel(256);
@@ -1401,12 +1406,12 @@ impl Handle {
         let node_map = node_map.unwrap_or_default();
         let node_map = NodeMap::load_from_vec(node_map);
 
-        let udp_state = quinn_udp::UdpState::default();
         let inner = Arc::new(MagicSock {
             me,
             port: AtomicU16::new(port),
             secret_key,
             proxy_url,
+            #[cfg(feature = "native")]
             local_addrs: std::sync::RwLock::new((ipv4_addr, ipv6_addr)),
             closing: AtomicBool::new(false),
             closed: AtomicBool::new(false),
@@ -1419,15 +1424,17 @@ impl Handle {
             my_relay: Default::default(),
             pconn4: pconn4.clone(),
             pconn6: pconn6.clone(),
+            #[cfg(feature = "native")]
             net_checker: net_checker.clone(),
             disco_secrets: DiscoSecrets::default(),
             node_map,
             relay_actor_sender: relay_actor_sender.clone(),
-            udp_state,
+            #[cfg(feature = "native")]
+            udp_state: quinn_udp::UdpState::default(),
             send_buffer: Default::default(),
             udp_disco_sender,
             discovery,
-            endpoints: Watchable::new(Default::default()),
+            endpoints: Watchable::default(),
             pending_call_me_maybes: Default::default(),
             endpoints_update_state: EndpointUpdateState::new(),
             dns_resolver,
@@ -1504,7 +1511,6 @@ impl Handle {
         self.msock.closing.store(true, Ordering::Relaxed);
         self.msock.actor_sender.send(ActorMessage::Shutdown).await?;
         self.msock.closed.store(true, Ordering::SeqCst);
-        self.msock.endpoints.shutdown();
 
         let mut tasks = self.actor_tasks.lock().await;
 
@@ -1533,8 +1539,7 @@ impl Handle {
 /// Stream returning local endpoints as they change.
 #[derive(Debug)]
 pub struct DirectAddrsStream {
-    initial: Option<DiscoveredEndpoints>,
-    inner: watchable::WatcherStream<DiscoveredEndpoints>,
+    inner: Watcher<DiscoveredEndpoints>,
 }
 
 impl Stream for DirectAddrsStream {
@@ -1542,11 +1547,6 @@ impl Stream for DirectAddrsStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = &mut *self;
-        if let Some(initial_endpoints) = this.initial.take() {
-            if !initial_endpoints.is_empty() {
-                return Poll::Ready(Some(initial_endpoints.into_iter().collect()));
-            }
-        }
         loop {
             match Pin::new(&mut this.inner).poll_next(cx) {
                 Poll::Pending => break Poll::Pending,
@@ -1689,6 +1689,7 @@ enum ActorMessage {
     Shutdown,
     ReceiveRelay(RelayReadResult),
     EndpointPingExpired(usize, stun::TransactionId),
+    #[cfg(feature = "native")]
     NetcheckReport(Result<Option<Arc<netcheck::Report>>>, &'static str),
     NetworkChange,
     #[cfg(test)]
@@ -1779,6 +1780,8 @@ impl Actor {
                     let reason = *endpoints_update_receiver.borrow();
                     trace!("tick: endpoints update receiver {:?}", reason);
                     if let Some(reason) = reason {
+                        // TODO(matheus23): Find a better way
+                        #[cfg(feature = "native")]
                         self.update_endpoints(reason).await;
                     }
                 }
@@ -1856,6 +1859,7 @@ impl Actor {
             ActorMessage::EndpointPingExpired(id, txid) => {
                 self.msock.node_map.notify_ping_timeout(id, txid);
             }
+            #[cfg(feature = "native")]
             ActorMessage::NetcheckReport(report, why) => {
                 match report {
                     Ok(report) => {
@@ -1950,6 +1954,7 @@ impl Actor {
     /// Note that invoking this is managed by the [`EndpointUpdateState`] and this should
     /// never be invoked directly.  Some day this will be refactored to not allow this easy
     /// mistake to be made.
+    #[cfg(feature = "native")]
     #[instrument(level = "debug", skip_all)]
     async fn update_endpoints(&mut self, why: &'static str) {
         inc!(MagicsockMetrics, update_endpoints);
@@ -2161,6 +2166,7 @@ impl Actor {
     /// Note that invoking this is managed by [`EndpointUpdateState`] via `update_endpoints`
     /// and this should never be invoked directly.  Some day this will be refactored to not
     /// allow this easy mistake to be made.
+    #[cfg(feature = "native")]
     #[instrument(level = "debug", skip_all)]
     async fn update_net_info(&mut self, why: &'static str) {
         if self.msock.relay_map.is_empty() {
@@ -2207,6 +2213,7 @@ impl Actor {
         }
     }
 
+    #[cfg(feature = "native")]
     async fn handle_netcheck_report(&mut self, report: Option<Arc<netcheck::Report>>) {
         if let Some(ref report) = report {
             self.msock
@@ -2388,6 +2395,7 @@ fn new_re_stun_timer(initial_delay: bool) -> time::Interval {
 }
 
 /// Initial connection setup.
+#[cfg(feature = "native")]
 fn bind(port: u16) -> Result<(UdpConn, Option<UdpConn>)> {
     let pconn4 = UdpConn::bind(port, IpFamily::V4).context("bind IPv4 failed")?;
     let ip4_port = pconn4.local_addr()?.port();
@@ -2404,7 +2412,7 @@ fn bind(port: u16) -> Result<(UdpConn, Option<UdpConn>)> {
     Ok((pconn4, pconn6))
 }
 
-#[derive(derive_more::Debug, Default, Clone)]
+#[derive(derive_more::Debug, Default, Clone, Eq)]
 struct DiscoveredEndpoints {
     /// Records the endpoints found during the previous
     /// endpoint discovery. It's used to avoid duplicate endpoint change notifications.

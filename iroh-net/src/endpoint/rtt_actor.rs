@@ -6,11 +6,12 @@ use futures_concurrency::stream::stream_group;
 use futures_lite::StreamExt;
 use iroh_base::key::NodeId;
 use tokio::sync::{mpsc, Notify};
-use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tracing::{debug, error, info_span, trace, warn, Instrument};
 
 use crate::magicsock::{ConnectionType, ConnectionTypeStream};
+use crate::util::task::{self, JoinHandle};
+use crate::util::time;
 
 #[derive(Debug)]
 pub(super) struct RttHandle {
@@ -27,7 +28,7 @@ impl RttHandle {
             tick: Notify::new(),
         };
         let (msg_tx, msg_rx) = mpsc::channel(16);
-        let _handle = tokio::spawn(
+        let _handle = task::spawn(
             async move {
                 actor.run(msg_rx).await;
             }
@@ -75,7 +76,7 @@ impl RttActor {
     ///
     /// The main loop will finish when the sender is dropped.
     async fn run(&mut self, mut msg_rx: mpsc::Receiver<RttMessage>) {
-        let mut cleanup_interval = tokio::time::interval(Duration::from_secs(5));
+        let mut cleanup_interval = time::interval(Duration::from_secs(5));
         cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {

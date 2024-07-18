@@ -401,11 +401,18 @@ impl Endpoint {
         // the packet if grease_quic_bit is set to false.
         endpoint_config.grease_quic_bit(false);
 
+        let runtime = {
+            #[cfg(not(feature = "wasm"))]
+            quinn::TokioRuntime
+            #[cfg(feature = "wasm")]
+            quinn::WasmRuntime
+        };
+
         let endpoint = quinn::Endpoint::new_with_abstract_socket(
             endpoint_config,
             Some(server_config),
             msock.clone(),
-            Arc::new(quinn::TokioRuntime),
+            Arc::new(runtime),
         )?;
         trace!("created quinn endpoint");
 

@@ -10,7 +10,6 @@ use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{debug, event, info, instrument, trace, warn, Level};
-use watchable::{Watchable, WatcherStream};
 
 use crate::{
     disco::{self, SendAddr},
@@ -20,7 +19,10 @@ use crate::{
     net::ip::is_unicast_link_local,
     relay::RelayUrl,
     stun,
-    util::relay_only_mode,
+    util::{
+        relay_only_mode,
+        watchable::{Watchable, Watcher},
+    },
     NodeAddr, NodeId,
 };
 
@@ -192,16 +194,16 @@ impl NodeState {
     }
 
     pub(super) fn conn_type(&self) -> ConnectionType {
-        self.conn_type.get()
+        self.conn_type.get().clone()
     }
 
-    pub(super) fn conn_type_stream(&self) -> WatcherStream<ConnectionType> {
-        self.conn_type.watch().into_stream()
+    pub(super) fn conn_type_stream(&self) -> Watcher<ConnectionType> {
+        self.conn_type.watch_initial()
     }
 
     /// Returns info about this endpoint
     pub(super) fn info(&self, now: Instant) -> NodeInfo {
-        let conn_type = self.conn_type.get();
+        let conn_type = self.conn_type.get().clone();
         let latency = match conn_type {
             ConnectionType::Direct(addr) => self
                 .direct_addr_state
@@ -309,7 +311,7 @@ impl NodeState {
             (None, Some(relay_url)) => ConnectionType::Relay(relay_url),
             (None, None) => ConnectionType::None,
         };
-        if self.conn_type.update(typ).is_ok() {
+        if self.conn_type.set(typ).is_some() {
             let typ = self.conn_type.get();
             event!(
                 target: "events.net.conn_type.changed",
