@@ -123,6 +123,7 @@ impl NodeMap {
         self.inner.lock().node_count()
     }
 
+    #[cfg(feature = "native")]
     pub(super) fn receive_udp(&self, udp_addr: SocketAddr) -> Option<(PublicKey, QuicMappedAddr)> {
         self.inner.lock().receive_udp(udp_addr)
     }
@@ -176,12 +177,23 @@ impl NodeMap {
     }
 
     #[must_use = "actions must be handled"]
+    #[cfg(feature = "native")]
     pub(super) fn handle_call_me_maybe(
         &self,
         sender: PublicKey,
         cm: CallMeMaybe,
     ) -> Vec<PingAction> {
         self.inner.lock().handle_call_me_maybe(sender, cm)
+    }
+
+    #[must_use = "actions must be handled"]
+    #[cfg(not(feature = "native"))]
+    pub(super) fn handle_call_me_maybe(
+        &self,
+        sender: PublicKey,
+        cm: CallMeMaybe,
+    ) -> Vec<PingAction> {
+        Vec::new()
     }
 
     #[allow(clippy::type_complexity)]
@@ -352,6 +364,7 @@ impl NodeMapInner {
     }
 
     /// Marks the node we believe to be at `ipp` as recently used.
+    #[cfg(feature = "native")]
     fn receive_udp(&mut self, udp_addr: SocketAddr) -> Option<(NodeId, QuicMappedAddr)> {
         let ip_port: IpPort = udp_addr.into();
         let Some(node_state) = self.get_mut(NodeStateKey::IpPort(ip_port)) else {
@@ -427,6 +440,7 @@ impl NodeMapInner {
     }
 
     #[must_use = "actions must be handled"]
+    #[cfg(feature = "native")]
     fn handle_call_me_maybe(&mut self, sender: NodeId, cm: CallMeMaybe) -> Vec<PingAction> {
         let ns_id = NodeStateKey::NodeId(sender);
         if let Some(id) = self.get_id(ns_id.clone()) {
@@ -466,6 +480,7 @@ impl NodeMapInner {
         });
 
         let handled = node_state.handle_ping(src.clone(), tx_id);
+        #[cfg(feature = "native")]
         if let SendAddr::Udp(ref addr) = src {
             if matches!(handled.role, PingRole::NewPath) {
                 self.set_node_key_for_ip_port(*addr, &sender);

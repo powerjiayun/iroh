@@ -13,12 +13,15 @@ use tokio::{
 };
 use tracing::{debug, error_span, info, warn, Instrument};
 use url::Url;
-use watchable::{Watchable, Watcher};
 
 use crate::{
     discovery::{Discovery, DiscoveryItem},
     dns::node_info::NodeInfo,
     key::SecretKey,
+    util::{
+        time,
+        watchable::{Watchable, Watcher},
+    },
     AddrInfo, Endpoint, NodeId,
 };
 
@@ -148,7 +151,7 @@ struct PublisherService {
 impl PublisherService {
     async fn run(self) {
         let mut failed_attempts = 0;
-        let republish = tokio::time::sleep(Duration::MAX);
+        let republish = time::sleep(Duration::MAX);
         tokio::pin!(republish);
         loop {
             if let Some(info) = self.watcher.get() {

@@ -44,10 +44,16 @@ use std::time::Duration;
 use anyhow::{anyhow, ensure, Result};
 use futures_lite::stream::{Boxed as BoxStream, StreamExt};
 use iroh_base::node_addr::NodeAddr;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::sync::oneshot;
 use tracing::{debug, error_span, warn, Instrument};
 
-use crate::{AddrInfo, Endpoint, NodeId};
+use crate::{
+    util::{
+        task::{self, JoinHandle},
+        time,
+    },
+    AddrInfo, Endpoint, NodeId,
+};
 
 pub mod dns;
 
@@ -186,7 +192,7 @@ impl DiscoveryTask {
         ensure!(ep.discovery().is_some(), "No discovery services configured");
         let (on_first_tx, on_first_rx) = oneshot::channel();
         let me = ep.node_id();
-        let task = tokio::task::spawn(
+        let task = task::spawn(
             async move { Self::run(ep, node_id, on_first_tx).await }.instrument(
                 error_span!("discovery", me = %me.fmt_short(), node = %node_id.fmt_short()),
             ),
@@ -215,11 +221,11 @@ impl DiscoveryTask {
         let (on_first_tx, on_first_rx) = oneshot::channel();
         let ep = ep.clone();
         let me = ep.node_id();
-        let task = tokio::task::spawn(
+        let task = task::spawn(
             async move {
                 // If delay is set, wait and recheck if discovery is needed. If not, early-exit.
                 if let Some(delay) = delay {
-                    tokio::time::sleep(delay).await;
+                    time::sleep(delay).await;
                     if !Self::needs_discovery(&ep, node_id) {
                         debug!("no discovery needed, abort");
                         on_first_tx.send(Ok(())).ok();

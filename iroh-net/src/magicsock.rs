@@ -19,7 +19,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     fmt::Display,
     io,
-    net::{IpAddr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     pin::Pin,
     sync::{
         atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering},
@@ -52,15 +52,19 @@ use url::Url;
 use crate::{
     disco::{self, SendAddr},
     discovery::Discovery,
-    dns::DnsResolver,
     endpoint::NodeAddr,
     key::{PublicKey, SecretKey, SharedSecret},
-    net::{interfaces, ip::LocalAddresses, netmon, IpFamily},
-    netcheck, portmapper,
+    netcheck,
     relay::{RelayMap, RelayUrl},
     stun,
     util::watchable::{Watchable, Watcher},
     AddrInfo,
+};
+#[cfg(feature = "native")]
+use crate::{
+    dns::DnsResolver,
+    net::{interfaces, ip::LocalAddresses, netmon, IpFamily},
+    portmapper,
 };
 
 #[cfg(feature = "native")]
@@ -117,6 +121,7 @@ pub(crate) struct Options {
     ///
     /// You can use [`crate::dns::default_resolver`] for a resolver that uses the system's DNS
     /// configuration.
+    #[cfg(feature = "native")]
     pub(crate) dns_resolver: DnsResolver,
 
     /// Proxy configuration.
@@ -138,6 +143,7 @@ impl Default for Options {
             node_map: None,
             discovery: None,
             proxy_url: None,
+            #[cfg(feature = "native")]
             dns_resolver: crate::dns::default_resolver().clone(),
             #[cfg(any(test, feature = "test-utils"))]
             insecure_skip_relay_cert_verify: false,
@@ -186,12 +192,14 @@ pub(crate) struct MagicSock {
     network_send_wakers: parking_lot::Mutex<Option<Waker>>,
 
     /// The DNS resolver to be used in this magicsock.
+    #[cfg(feature = "native")]
     dns_resolver: DnsResolver,
 
     /// Key for this node.
     secret_key: SecretKey,
 
     /// Cached version of the Ipv4 and Ipv6 addrs of the current connection.
+    #[cfg(feature = "native")]
     local_addrs: std::sync::RwLock<(SocketAddr, Option<SocketAddr>)>,
 
     /// Preferred port from `Options::port`; 0 means auto.
@@ -211,13 +219,16 @@ pub(crate) struct MagicSock {
     /// Tracks the networkmap node entity for each node discovery key.
     node_map: NodeMap,
     /// UDP IPv4 socket
+    #[cfg(feature = "native")]
     pconn4: UdpConn,
     /// UDP IPv6 socket
+    #[cfg(feature = "native")]
     pconn6: Option<UdpConn>,
     /// Netcheck client
     net_checker: netcheck::Client,
     /// The state for an active DiscoKey.
     disco_secrets: DiscoSecrets,
+    #[cfg(feature = "native")]
     udp_state: quinn_udp::UdpState,
 
     /// Send buffer used in `poll_send_udp`
@@ -283,6 +294,7 @@ impl MagicSock {
     }
 
     /// Get the cached version of the Ipv4 and Ipv6 addrs of the current connection.
+    #[cfg(feature = "native")]
     pub(crate) fn local_addr(&self) -> (SocketAddr, Option<SocketAddr>) {
         *self.local_addrs.read().expect("not poisoned")
     }
@@ -399,6 +411,7 @@ impl MagicSock {
     }
 
     /// Get a reference to the DNS resolver used in this [`MagicSock`].
+    #[cfg(feature = "native")]
     pub(crate) fn dns_resolver(&self) -> &DnsResolver {
         &self.dns_resolver
     }
@@ -409,6 +422,7 @@ impl MagicSock {
     }
 
     /// Call to notify the system of potential network changes.
+    #[cfg(feature = "native")]
     pub(crate) async fn network_change(&self) {
         self.actor_sender
             .send(ActorMessage::NetworkChange)
@@ -424,6 +438,7 @@ impl MagicSock {
             .ok();
     }
 
+    #[cfg(feature = "native")]
     fn normalized_local_addr(&self) -> io::Result<SocketAddr> {
         let (v4, v6) = self.local_addr();
         let addr = if let Some(v6) = v6 { v6 } else { v4 };
@@ -515,6 +530,7 @@ impl MagicSock {
                 let mut relay_pending = false;
 
                 // send udp
+                #[cfg(feature = "native")]
                 if let Some(addr) = udp_addr {
                     // rewrite target addresses.
                     for t in transmits.iter_mut() {
@@ -625,6 +641,7 @@ impl MagicSock {
         }
     }
 
+    #[cfg(feature = "native")]
     fn poll_send_udp(
         &self,
         addr: SocketAddr,
@@ -646,6 +663,7 @@ impl MagicSock {
         Poll::Ready(Ok(n))
     }
 
+    #[cfg(feature = "native")]
     fn conn_for_addr(&self, addr: SocketAddr) -> io::Result<&UdpConn> {
         let sock = match addr {
             SocketAddr::V4(_) => &self.pconn4,
@@ -659,6 +677,7 @@ impl MagicSock {
 
     /// NOTE: Receiving on a [`Self::closed`] socket will return [`Poll::Pending`] indefinitely.
     #[instrument(skip_all, fields(me = %self.me))]
+    #[cfg(feature = "native")]
     fn poll_recv(
         &self,
         cx: &mut Context,
@@ -769,6 +788,23 @@ impl MagicSock {
         }
 
         Poll::Ready(Ok(msgs))
+    }
+
+    #[instrument(skip_all, fields(me = %self.me))]
+    #[cfg(not(feature = "native"))]
+    fn poll_recv(
+        &self,
+        cx: &mut Context,
+        bufs: &mut [io::IoSliceMut<'_>],
+        metas: &mut [quinn_udp::RecvMeta],
+    ) -> Poll<io::Result<usize>> {
+        // FIXME: currently ipv4 load results in ipv6 traffic being ignored
+        debug_assert_eq!(bufs.len(), metas.len(), "non matching bufs & metas");
+        if self.is_closed() {
+            return Poll::Pending;
+        }
+
+        self.poll_recv_relay(cx, bufs, metas)
     }
 
     #[instrument(skip_all, fields(name = %self.me))]
@@ -966,6 +1002,7 @@ impl MagicSock {
             node_key: self.public_key(),
         });
         let sent = match dst {
+            #[cfg(feature = "native")]
             SendAddr::Udp(addr) => self
                 .udp_disco_sender
                 .try_send((addr, dst_node, msg))
@@ -1016,6 +1053,7 @@ impl MagicSock {
         msg: disco::Message,
     ) -> bool {
         match dst {
+            #[cfg(feature = "native")]
             SendAddr::Udp(addr) => self.udp_disco_sender.try_send((addr, dst_key, msg)).is_ok(),
             SendAddr::Relay(ref url) => self.send_disco_message_relay(url, dst_key, msg),
         }
@@ -1030,6 +1068,7 @@ impl MagicSock {
         cx: &mut Context<'_>,
     ) -> Poll<io::Result<()>> {
         match dst {
+            #[cfg(feature = "native")]
             SendAddr::Udp(addr) => {
                 ready!(self.poll_send_disco_message_udp(addr, dst_key, &msg, cx))?;
             }
@@ -1059,6 +1098,7 @@ impl MagicSock {
         }
     }
 
+    #[cfg(feature = "native")]
     async fn send_disco_message_udp(
         &self,
         dst: SocketAddr,
@@ -1069,6 +1109,7 @@ impl MagicSock {
             .await
     }
 
+    #[cfg(feature = "native")]
     fn poll_send_disco_message_udp(
         &self,
         dst: SocketAddr,
@@ -1252,13 +1293,18 @@ impl MagicSock {
 
 #[derive(Clone, Debug)]
 enum DiscoMessageSource {
+    #[cfg(feature = "native")]
     Udp(SocketAddr),
-    Relay { url: RelayUrl, key: PublicKey },
+    Relay {
+        url: RelayUrl,
+        key: PublicKey,
+    },
 }
 
 impl Display for DiscoMessageSource {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
+            #[cfg(feature = "native")]
             Self::Udp(addr) => write!(f, "Udp({addr})"),
             Self::Relay { ref url, key } => write!(f, "Relay({url}, {})", key.fmt_short()),
         }
@@ -1268,6 +1314,7 @@ impl Display for DiscoMessageSource {
 impl From<DiscoMessageSource> for SendAddr {
     fn from(value: DiscoMessageSource) -> Self {
         match value {
+            #[cfg(feature = "native")]
             DiscoMessageSource::Udp(addr) => SendAddr::Udp(addr),
             DiscoMessageSource::Relay { url, .. } => SendAddr::Relay(url),
         }
@@ -1277,6 +1324,7 @@ impl From<DiscoMessageSource> for SendAddr {
 impl From<&DiscoMessageSource> for SendAddr {
     fn from(value: &DiscoMessageSource) -> Self {
         match value {
+            #[cfg(feature = "native")]
             DiscoMessageSource::Udp(addr) => SendAddr::Udp(*addr),
             DiscoMessageSource::Relay { url, .. } => SendAddr::Relay(url.clone()),
         }
@@ -1369,6 +1417,7 @@ impl Handle {
             relay_map,
             node_map,
             discovery,
+            #[cfg(feature = "native")]
             dns_resolver,
             proxy_url,
             #[cfg(any(test, feature = "test-utils"))]
@@ -1397,6 +1446,8 @@ impl Handle {
 
         #[cfg(feature = "native")]
         let net_checker = netcheck::Client::new(Some(port_mapper.clone()), dns_resolver.clone())?;
+        #[cfg(not(feature = "native"))]
+        let net_checker = netcheck::Client::new(None)?;
 
         let (actor_sender, actor_receiver) = mpsc::channel(256);
         let (relay_actor_sender, relay_actor_receiver) = mpsc::channel(256);
@@ -1406,7 +1457,7 @@ impl Handle {
         let node_map = node_map.unwrap_or_default();
         let node_map = NodeMap::load_from_vec(node_map);
 
-        let inner = Arc::new(MagicSock {
+        let msock = Arc::new(MagicSock {
             me,
             port: AtomicU16::new(port),
             secret_key,
@@ -1422,9 +1473,10 @@ impl Handle {
             ipv6_reported: Arc::new(AtomicBool::new(false)),
             relay_map,
             my_relay: Default::default(),
-            pconn4: pconn4.clone(),
-            pconn6: pconn6.clone(),
             #[cfg(feature = "native")]
+            pconn4: pconn4.clone(),
+            #[cfg(feature = "native")]
+            pconn6: pconn6.clone(),
             net_checker: net_checker.clone(),
             disco_secrets: DiscoSecrets::default(),
             node_map,
@@ -1437,6 +1489,7 @@ impl Handle {
             endpoints: Watchable::default(),
             pending_call_me_maybes: Default::default(),
             endpoints_update_state: EndpointUpdateState::new(),
+            #[cfg(feature = "native")]
             dns_resolver,
             #[cfg(any(test, feature = "test-utils"))]
             insecure_skip_relay_cert_verify,
@@ -1444,7 +1497,7 @@ impl Handle {
 
         let mut actor_tasks = JoinSet::default();
 
-        let relay_actor = RelayActor::new(inner.clone(), actor_sender.clone());
+        let relay_actor = RelayActor::new(msock.clone(), actor_sender.clone());
         let relay_actor_cancel_token = relay_actor.cancel_token();
         actor_tasks.spawn(
             async move {
@@ -1453,33 +1506,40 @@ impl Handle {
             .instrument(info_span!("relay-actor")),
         );
 
-        let inner2 = inner.clone();
-        actor_tasks.spawn(async move {
+        #[cfg(feature = "native")]
+        actor_tasks.spawn({
+            let msock = msock.clone();
+            async move {
             while let Some((dst, dst_key, msg)) = udp_disco_receiver.recv().await {
-                if let Err(err) = inner2.send_disco_message_udp(dst, dst_key, &msg).await {
+                if let Err(err) = msock.send_disco_message_udp(dst, dst_key, &msg).await {
                     warn!(%dst, node = %dst_key.fmt_short(), ?err, "failed to send disco message (UDP)");
                 }
             }
-        });
+        }});
 
-        let inner2 = inner.clone();
+        #[cfg(feature = "native")]
         let network_monitor = netmon::Monitor::new().await?;
-        actor_tasks.spawn(
+        actor_tasks.spawn({
+            let msock = msock.clone();
             async move {
                 let actor = Actor {
                     msg_receiver: actor_receiver,
                     msg_sender: actor_sender,
                     relay_actor_sender,
                     relay_actor_cancel_token,
-                    msock: inner2,
+                    msock,
                     relay_recv_sender,
                     periodic_re_stun_timer: new_re_stun_timer(false),
                     net_info_last: None,
+                    #[cfg(feature = "native")]
                     port_mapper,
+                    #[cfg(feature = "native")]
                     pconn4,
+                    #[cfg(feature = "native")]
                     pconn6,
                     no_v4_send: false,
                     net_checker,
+                    #[cfg(feature = "native")]
                     network_monitor,
                 };
 
@@ -1487,11 +1547,11 @@ impl Handle {
                     warn!("relay handler errored: {:?}", err);
                 }
             }
-            .instrument(info_span!("actor")),
-        );
+            .instrument(info_span!("actor"))
+        });
 
         let c = Handle {
-            msock: inner,
+            msock,
             actor_tasks: Arc::new(Mutex::new(actor_tasks)),
         };
 
@@ -1668,6 +1728,7 @@ impl AsyncUdpSocket for Handle {
         self.msock.poll_recv(cx, bufs, metas)
     }
 
+    #[cfg(feature = "native")]
     fn local_addr(&self) -> io::Result<SocketAddr> {
         match &*self.msock.local_addrs.read().expect("not poisoned") {
             (ipv4, None) => {
@@ -1681,6 +1742,11 @@ impl AsyncUdpSocket for Handle {
             }
             (_, Some(ipv6)) => Ok(*ipv6),
         }
+    }
+
+    #[cfg(not(feature = "native"))]
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        todo!() // TODO(matheus23): What do we do with binding ports in browsers?
     }
 }
 
@@ -1710,10 +1776,13 @@ struct Actor {
     net_info_last: Option<NetInfo>,
 
     // The underlying UDP sockets used to send/rcv packets.
+    #[cfg(feature = "native")]
     pconn4: UdpConn,
+    #[cfg(feature = "native")]
     pconn6: Option<UdpConn>,
 
     /// The NAT-PMP/PCP/UPnP prober/client, for requesting port mappings from NAT devices.
+    #[cfg(feature = "native")]
     port_mapper: portmapper::Client,
 
     /// Whether IPv4 UDP is known to be unable to transmit
@@ -1731,6 +1800,7 @@ impl Actor {
     async fn run(mut self) -> Result<()> {
         // Setup network monitoring
         let (link_change_s, mut link_change_r) = mpsc::channel(8);
+        #[cfg(feature = "native")]
         let _token = self
             .network_monitor
             .subscribe(move |is_major| {
@@ -1748,9 +1818,11 @@ impl Actor {
             HEARTBEAT_INTERVAL,
         );
         let mut endpoints_update_receiver = self.msock.endpoints_update_state.running.subscribe();
+        #[cfg(feature = "native")]
         let mut portmap_watcher = self.port_mapper.watch_external_address();
 
         loop {
+            #[cfg(feature = "native")]
             tokio::select! {
                 Some(msg) = self.msg_receiver.recv() => {
                     trace!(?msg, "tick: msg");
@@ -1793,6 +1865,43 @@ impl Actor {
                     trace!("tick: other");
                 }
             }
+            #[cfg(not(feature = "native"))]
+            tokio::select! {
+                Some(msg) = self.msg_receiver.recv() => {
+                    trace!(?msg, "tick: msg");
+                    if self.handle_actor_message(msg).await {
+                        return Ok(());
+                    }
+                }
+                tick = self.periodic_re_stun_timer.tick() => {
+                    trace!("tick: re_stun {:?}", tick);
+                    self.msock.re_stun("periodic");
+                }
+                _ = endpoint_heartbeat_timer.tick() => {
+                    trace!("tick: endpoint heartbeat {} endpoints", self.msock.node_map.node_count());
+                    // TODO: this might trigger too many packets at once, pace this
+
+                    self.msock.node_map.prune_inactive();
+                    let msgs = self.msock.node_map.nodes_stayin_alive();
+                    self.handle_ping_actions(msgs).await;
+                }
+                _ = endpoints_update_receiver.changed() => {
+                    let reason = *endpoints_update_receiver.borrow();
+                    trace!("tick: endpoints update receiver {:?}", reason);
+                    if let Some(reason) = reason {
+                        // TODO(matheus23): Find a better way
+                        #[cfg(feature = "native")]
+                        self.update_endpoints(reason).await;
+                    }
+                }
+                Some(is_major) = link_change_r.recv() => {
+                    trace!("tick: link change {}", is_major);
+                    self.handle_network_change(is_major).await;
+                }
+                else => {
+                    trace!("tick: other");
+                }
+            }
         }
     }
 
@@ -1800,8 +1909,10 @@ impl Actor {
         debug!("link change detected: major? {}", is_major);
 
         if is_major {
+            #[cfg(feature = "native")]
             self.msock.dns_resolver.clear_cache();
             self.msock.re_stun("link-change-major");
+            #[cfg(feature = "native")]
             self.close_stale_relay_connections().await;
             self.reset_endpoint_states();
         } else {
@@ -1829,15 +1940,18 @@ impl Actor {
                 debug!("shutting down");
 
                 self.msock.node_map.notify_shutdown();
+                #[cfg(feature = "native")]
                 self.port_mapper.deactivate();
                 self.relay_actor_cancel_token.cancel();
 
                 // Ignore errors from pconnN
                 // They will frequently have been closed already by a call to connBind.Close.
                 debug!("stopping connections");
+                #[cfg(feature = "native")]
                 if let Some(ref conn) = self.pconn6 {
                     conn.close().await.ok();
                 }
+                #[cfg(feature = "native")]
                 self.pconn4.close().await.ok();
 
                 debug!("shutdown complete");
@@ -1883,6 +1997,7 @@ impl Actor {
         false
     }
 
+    #[cfg(feature = "native")]
     fn normalized_local_addr(&self) -> io::Result<SocketAddr> {
         let (v4, v6) = self.local_addr();
         if let Some(v6) = v6 {
@@ -1891,6 +2006,7 @@ impl Actor {
         v4
     }
 
+    #[cfg(feature = "native")]
     fn local_addr(&self) -> (io::Result<SocketAddr>, Option<io::Result<SocketAddr>>) {
         // TODO: think more about this
         // needs to pretend ipv6 always as the fake addrs are ipv6
@@ -1918,7 +2034,10 @@ impl Actor {
         // split the packet into these parts
         let parts = PacketSplitIter::new(dm.buf);
         // Normalize local_ip
+        #[cfg(feature = "native")]
         let dst_ip = self.normalized_local_addr().ok().map(|addr| addr.ip());
+        #[cfg(not(feature = "native"))]
+        let dst_ip = None;
 
         let mut out = Vec::new();
         for part in parts {
@@ -1966,8 +2085,6 @@ impl Actor {
 
     /// Stores the results of a successful endpoint update.
     async fn store_endpoints_update(&mut self, nr: Option<Arc<netcheck::Report>>) {
-        let portmap_watcher = self.port_mapper.watch_external_address();
-
         // endpoint -> how it was found
         let mut already = HashMap::new();
         // unique endpoints
@@ -1986,11 +2103,16 @@ impl Actor {
             };
         }
 
-        let maybe_port_mapped = *portmap_watcher.borrow();
+        #[cfg(feature = "native")]
+        {
+            let portmap_watcher = self.port_mapper.watch_external_address();
 
-        if let Some(portmap_ext) = maybe_port_mapped.map(SocketAddr::V4) {
-            add_addr!(already, eps, portmap_ext, DirectAddrType::Portmapped);
-            self.set_net_info_have_port_map().await;
+            let maybe_port_mapped = *portmap_watcher.borrow();
+
+            if let Some(portmap_ext) = maybe_port_mapped.map(SocketAddr::V4) {
+                add_addr!(already, eps, portmap_ext, DirectAddrType::Portmapped);
+                self.set_net_info_have_port_map().await;
+            }
         }
 
         if let Some(nr) = nr {
@@ -2012,114 +2134,118 @@ impl Actor {
                 add_addr!(already, eps, global_v6.into(), DirectAddrType::Stun);
             }
         }
-        let local_addr_v4 = self.pconn4.local_addr().ok();
-        let local_addr_v6 = self.pconn6.as_ref().and_then(|c| c.local_addr().ok());
 
-        let is_unspecified_v4 = local_addr_v4
-            .map(|a| a.ip().is_unspecified())
-            .unwrap_or(false);
-        let is_unspecified_v6 = local_addr_v6
-            .map(|a| a.ip().is_unspecified())
-            .unwrap_or(false);
+        #[cfg(feature = "native")]
+        {
+            let local_addr_v4 = self.pconn4.local_addr().ok();
+            let local_addr_v6 = self.pconn6.as_ref().and_then(|c| c.local_addr().ok());
 
-        let msock = self.msock.clone();
+            let is_unspecified_v4 = local_addr_v4
+                .map(|a| a.ip().is_unspecified())
+                .unwrap_or(false);
+            let is_unspecified_v6 = local_addr_v6
+                .map(|a| a.ip().is_unspecified())
+                .unwrap_or(false);
 
-        tokio::spawn(
-            async move {
-                // Depending on the OS and network interfaces attached and their state enumerating
-                // the local interfaces can take a long time.  Especially Windows is very slow.
-                let LocalAddresses {
-                    regular: mut ips,
-                    loopback,
-                } = tokio::task::spawn_blocking(LocalAddresses::new)
-                    .await
-                    .unwrap();
+            let msock = self.msock.clone();
 
-                if is_unspecified_v4 || is_unspecified_v6 {
-                    if ips.is_empty() && eps.is_empty() {
-                        // Only include loopback addresses if we have no
-                        // interfaces at all to use as endpoints and don't
-                        // have a public IPv4 or IPv6 address. This allows
-                        // for localhost testing when you're on a plane and
-                        // offline, for example.
-                        ips = loopback;
-                    }
-                    let v4_port = local_addr_v4.and_then(|addr| {
-                        if addr.ip().is_unspecified() {
-                            Some(addr.port())
-                        } else {
-                            None
+            tokio::spawn(
+                async move {
+                    // Depending on the OS and network interfaces attached and their state enumerating
+                    // the local interfaces can take a long time.  Especially Windows is very slow.
+                    let LocalAddresses {
+                        regular: mut ips,
+                        loopback,
+                    } = tokio::task::spawn_blocking(LocalAddresses::new)
+                        .await
+                        .unwrap();
+
+                    if is_unspecified_v4 || is_unspecified_v6 {
+                        if ips.is_empty() && eps.is_empty() {
+                            // Only include loopback addresses if we have no
+                            // interfaces at all to use as endpoints and don't
+                            // have a public IPv4 or IPv6 address. This allows
+                            // for localhost testing when you're on a plane and
+                            // offline, for example.
+                            ips = loopback;
                         }
-                    });
+                        let v4_port = local_addr_v4.and_then(|addr| {
+                            if addr.ip().is_unspecified() {
+                                Some(addr.port())
+                            } else {
+                                None
+                            }
+                        });
 
-                    let v6_port = local_addr_v6.and_then(|addr| {
-                        if addr.ip().is_unspecified() {
-                            Some(addr.port())
-                        } else {
-                            None
-                        }
-                    });
+                        let v6_port = local_addr_v6.and_then(|addr| {
+                            if addr.ip().is_unspecified() {
+                                Some(addr.port())
+                            } else {
+                                None
+                            }
+                        });
 
-                    for ip in ips {
-                        match ip {
-                            IpAddr::V4(_) => {
-                                if let Some(port) = v4_port {
-                                    add_addr!(
-                                        already,
-                                        eps,
-                                        SocketAddr::new(ip, port),
-                                        DirectAddrType::Local
-                                    );
+                        for ip in ips {
+                            match ip {
+                                IpAddr::V4(_) => {
+                                    if let Some(port) = v4_port {
+                                        add_addr!(
+                                            already,
+                                            eps,
+                                            SocketAddr::new(ip, port),
+                                            DirectAddrType::Local
+                                        );
+                                    }
+                                }
+                                IpAddr::V6(_) => {
+                                    if let Some(port) = v6_port {
+                                        add_addr!(
+                                            already,
+                                            eps,
+                                            SocketAddr::new(ip, port),
+                                            DirectAddrType::Local
+                                        );
+                                    }
                                 }
                             }
-                            IpAddr::V6(_) => {
-                                if let Some(port) = v6_port {
-                                    add_addr!(
-                                        already,
-                                        eps,
-                                        SocketAddr::new(ip, port),
-                                        DirectAddrType::Local
-                                    );
-                                }
-                            }
                         }
                     }
-                }
 
-                if !is_unspecified_v4 {
-                    if let Some(addr) = local_addr_v4 {
-                        // Our local endpoint is bound to a particular address.
-                        // Do not offer addresses on other local interfaces.
-                        add_addr!(already, eps, addr, DirectAddrType::Local);
+                    if !is_unspecified_v4 {
+                        if let Some(addr) = local_addr_v4 {
+                            // Our local endpoint is bound to a particular address.
+                            // Do not offer addresses on other local interfaces.
+                            add_addr!(already, eps, addr, DirectAddrType::Local);
+                        }
                     }
-                }
 
-                if !is_unspecified_v6 {
-                    if let Some(addr) = local_addr_v6 {
-                        // Our local endpoint is bound to a particular address.
-                        // Do not offer addresses on other local interfaces.
-                        add_addr!(already, eps, addr, DirectAddrType::Local);
+                    if !is_unspecified_v6 {
+                        if let Some(addr) = local_addr_v6 {
+                            // Our local endpoint is bound to a particular address.
+                            // Do not offer addresses on other local interfaces.
+                            add_addr!(already, eps, addr, DirectAddrType::Local);
+                        }
                     }
+
+                    // Note: the endpoints are intentionally returned in priority order,
+                    // from "farthest but most reliable" to "closest but least
+                    // reliable." Addresses returned from STUN should be globally
+                    // addressable, but might go farther on the network than necessary.
+                    // Local interface addresses might have lower latency, but not be
+                    // globally addressable.
+                    //
+                    // The STUN address(es) are always first.
+                    // Despite this sorting, clients are not relying on this sorting for decisions;
+
+                    msock.update_direct_addresses(eps);
+
+                    // Regardless of whether our local endpoints changed, we now want to send any queued
+                    // call-me-maybe messages.
+                    msock.send_queued_call_me_maybes();
                 }
-
-                // Note: the endpoints are intentionally returned in priority order,
-                // from "farthest but most reliable" to "closest but least
-                // reliable." Addresses returned from STUN should be globally
-                // addressable, but might go farther on the network than necessary.
-                // Local interface addresses might have lower latency, but not be
-                // globally addressable.
-                //
-                // The STUN address(es) are always first.
-                // Despite this sorting, clients are not relying on this sorting for decisions;
-
-                msock.update_direct_addresses(eps);
-
-                // Regardless of whether our local endpoints changed, we now want to send any queued
-                // call-me-maybe messages.
-                msock.send_queued_call_me_maybes();
-            }
-            .instrument(Span::current()),
-        );
+                .instrument(Span::current()),
+            );
+        }
     }
 
     /// Called when an endpoints update is done, no matter if it was successful or not.
@@ -2327,6 +2453,7 @@ impl Actor {
     /// The relay connections who's local endpoints no longer exist after a network change
     /// will error out soon enough.  Closing them eagerly speeds this up however and allows
     /// re-establishing a relay connection faster.
+    #[cfg(feature = "native")]
     async fn close_stale_relay_connections(&self) {
         let ifs = interfaces::State::new().await;
         let local_ips = ifs
@@ -2677,6 +2804,7 @@ struct NetInfo {
     have_port_map: bool,
 
     /// Probe indicating the presence of port mapping protocols on the LAN.
+    #[cfg(feature = "native")]
     portmap_probe: Option<portmapper::ProbeOutput>,
 
     /// This node's preferred relay server for incoming traffic.

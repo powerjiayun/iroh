@@ -107,6 +107,7 @@ impl<T> Future for JoinHandle<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct JoinSet<T> {
     handles: Vec<JoinHandle<T>>,
 }
@@ -124,6 +125,14 @@ impl<T> JoinSet<T> {
         }
 
         Poll::Pending
+    }
+}
+
+impl<T> Default for JoinSet<T> {
+    fn default() -> Self {
+        Self {
+            handles: Vec::new(),
+        }
     }
 }
 

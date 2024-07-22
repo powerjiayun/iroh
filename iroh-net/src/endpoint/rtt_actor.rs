@@ -77,13 +77,16 @@ impl RttActor {
     /// The main loop will finish when the sender is dropped.
     async fn run(&mut self, mut msg_rx: mpsc::Receiver<RttMessage>) {
         let mut cleanup_interval = time::interval(Duration::from_secs(5));
-        cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        #[cfg(feature = "native")]
+        cleanup_interval
+            .as_mut()
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 Some(msg) = msg_rx.recv() => self.handle_msg(msg),
                 item = self.connection_events.next(),
                     if !self.connection_events.is_empty() => self.do_reset_rtt(item),
-                _ = cleanup_interval.tick() => self.do_connections_cleanup(),
+                _ = cleanup_interval.next() => self.do_connections_cleanup(),
                 () = self.tick.notified() => continue,
                 else => break,
             }

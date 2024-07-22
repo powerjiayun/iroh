@@ -4,6 +4,7 @@
 mod client;
 #[cfg(feature = "iroh-relay")]
 mod server;
+#[cfg(feature = "native")]
 pub(crate) mod streams;
 
 pub use self::client::{Client, ClientBuilder, ClientError, ClientReceiver};

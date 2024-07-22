@@ -17,6 +17,7 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 use tracing::{debug, info_span, trace, Instrument};
 
 use super::codec::PER_CLIENT_READ_QUEUE_DEPTH;
+#[cfg(feature = "native")]
 use super::http::streams::{MaybeTlsStreamReader, MaybeTlsStreamWriter};
 use super::{
     codec::{
@@ -258,11 +259,13 @@ pub struct ClientBuilder {
 }
 
 pub(crate) enum ConnReader {
+    #[cfg(feature = "native")]
     Derp(FramedRead<MaybeTlsStreamReader, DerpCodec>),
     Ws(SplitStream<WebSocketStream>),
 }
 
 pub(crate) enum ConnWriter {
+    #[cfg(feature = "native")]
     Derp(FramedWrite<MaybeTlsStreamWriter, DerpCodec>),
     Ws(SplitSink<WebSocketStream, tokio_tungstenite_wasm::Message>),
 }
@@ -279,6 +282,7 @@ impl Stream for ConnReader {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match *self {
+            #[cfg(feature = "native")]
             Self::Derp(ref mut ws) => Pin::new(ws).poll_next(cx),
             Self::Ws(ref mut ws) => match Pin::new(ws).poll_next(cx) {
                 Poll::Ready(Some(Ok(tokio_tungstenite_wasm::Message::Binary(vec)))) => {
@@ -301,6 +305,7 @@ impl Sink<Frame> for ConnWriter {
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match *self {
+            #[cfg(feature = "native")]
             Self::Derp(ref mut ws) => Pin::new(ws).poll_ready(cx),
             Self::Ws(ref mut ws) => Pin::new(ws).poll_ready(cx).map_err(tung_wasm_to_io_err),
         }
@@ -308,6 +313,7 @@ impl Sink<Frame> for ConnWriter {
 
     fn start_send(mut self: Pin<&mut Self>, item: Frame) -> Result<(), Self::Error> {
         match *self {
+            #[cfg(feature = "native")]
             Self::Derp(ref mut ws) => Pin::new(ws).start_send(item),
             Self::Ws(ref mut ws) => Pin::new(ws)
                 .start_send(tokio_tungstenite_wasm::Message::binary(
@@ -319,6 +325,7 @@ impl Sink<Frame> for ConnWriter {
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match *self {
+            #[cfg(feature = "native")]
             Self::Derp(ref mut ws) => Pin::new(ws).poll_flush(cx),
             Self::Ws(ref mut ws) => Pin::new(ws).poll_flush(cx).map_err(tung_wasm_to_io_err),
         }
@@ -326,6 +333,7 @@ impl Sink<Frame> for ConnWriter {
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match *self {
+            #[cfg(feature = "native")]
             Self::Derp(ref mut ws) => Pin::new(ws).poll_close(cx),
             Self::Ws(ref mut ws) => Pin::new(ws).poll_close(cx).map_err(tung_wasm_to_io_err),
         }

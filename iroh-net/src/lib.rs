@@ -129,7 +129,6 @@ mod magicsock;
 pub mod metrics;
 #[cfg(feature = "native")]
 pub mod net;
-#[cfg(feature = "native")]
 pub mod netcheck;
 #[cfg(feature = "native")]
 pub mod ping;

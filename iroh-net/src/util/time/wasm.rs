@@ -1,4 +1,10 @@
-pub use gloo_timers::future::{sleep, IntervalStream as Interval};
+use core::future::Future;
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
+
+pub use gloo_timers::future::IntervalStream as Interval;
 pub use web_time::{Duration, Instant};
 
 /// Errors returned by `Timeout`.
@@ -35,4 +41,26 @@ pub fn interval(dur: std::time::Duration) -> Interval {
 
 pub fn interval_at(start: Instant, dur: std::time::Duration) -> Interval {
     todo!()
+}
+
+#[pin_project::pin_project]
+pub struct Sleep(#[pin] gloo_timers::future::TimeoutFuture);
+
+pub fn sleep(duration: std::time::Duration) -> Sleep {
+    Sleep(gloo_timers::future::sleep(duration))
+}
+
+impl Future for Sleep {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        self.project().0.poll(cx)
+    }
+}
+
+impl Sleep {
+    pub fn reset(mut self: Pin<&mut Self>, deadline: Instant) {
+        let duration = deadline.saturating_duration_since(Instant::now());
+        self.set(sleep(duration));
+    }
 }

@@ -1,8 +1,8 @@
 use std::future::Future;
 use std::time::Duration;
 
-use tokio::task::JoinHandle;
-use tokio::time;
+use crate::util::task::{self, JoinHandle};
+use crate::util::time;
 
 /// A timer that works similar to golangs `Timer`.
 #[derive(Debug)]
@@ -16,7 +16,7 @@ impl Timer {
     where
         F: Future<Output = ()> + Send + Sync + 'static,
     {
-        let t = tokio::task::spawn(async move {
+        let t = task::spawn(async move {
             time::sleep(d).await;
             f.await
         });

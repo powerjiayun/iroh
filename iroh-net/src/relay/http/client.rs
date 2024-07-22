@@ -14,31 +14,37 @@ use hyper::body::Incoming;
 use hyper::header::UPGRADE;
 use hyper::upgrade::Parts;
 use hyper::Request;
+#[cfg(feature = "native")]
 use hyper_util::rt::TokioIo;
 use rand::Rng;
 use rustls::client::Resumption;
 use tokio::io::{AsyncRead, AsyncWrite};
+#[cfg(feature = "native")]
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinSet;
-use tokio::time::Instant;
 use tokio_util::codec::{FramedRead, FramedWrite};
 use tracing::{debug, error, event, info_span, trace, warn, Instrument, Level};
 use url::Url;
 
+#[cfg(feature = "native")]
 use crate::dns::{DnsResolver, ResolverExt};
 use crate::key::{PublicKey, SecretKey};
 use crate::relay::client::{ConnReader, ConnWriter};
 use crate::relay::codec::DerpCodec;
+#[cfg(feature = "native")]
 use crate::relay::http::streams::{downcast_upgrade, MaybeTlsStream};
 use crate::relay::RelayUrl;
 use crate::relay::{
     client::Client as RelayClient, client::ClientBuilder as RelayClientBuilder,
     client::ClientReceiver as RelayClientReceiver, ReceivedMessage,
 };
-use crate::util::AbortingJoinHandle;
 use crate::util::{chain, time};
+use crate::util::{
+    task::{self, JoinSet},
+    AbortingJoinHandle,
+};
 
+#[cfg(feature = "native")]
 use super::streams::ProxyStream;
 use super::Protocol;
 
@@ -173,9 +179,11 @@ struct Actor {
     url: RelayUrl,
     protocol: Protocol,
     #[debug("TlsConnector")]
+    #[cfg(feature = "native")]
     tls_connector: tokio_rustls::TlsConnector,
     pings: PingTracker,
     ping_tasks: JoinSet<()>,
+    #[cfg(feature = "native")]
     dns_resolver: DnsResolver,
     proxy_url: Option<Url>,
 }
@@ -314,6 +322,7 @@ impl ClientBuilder {
     }
 
     /// Build the [`Client`]
+    #[cfg(feature = "native")]
     pub fn build(self, key: SecretKey, dns_resolver: DnsResolver) -> (Client, ClientReceiver) {
         // TODO: review TLS config
         let mut roots = rustls::RootCertStore::empty();
@@ -355,6 +364,48 @@ impl ClientBuilder {
             protocol: self.protocol,
             tls_connector,
             dns_resolver,
+            proxy_url: self.proxy_url,
+        };
+
+        let (msg_sender, inbox) = mpsc::channel(64);
+        let (s, r) = mpsc::channel(64);
+        let recv_loop =
+            task::spawn(async move { inner.run(inbox, s).await }.instrument(info_span!("client")));
+
+        (
+            Client {
+                public_key,
+                inner: msg_sender,
+                recv_loop: Arc::new(recv_loop.into()),
+            },
+            ClientReceiver { msg_receiver: r },
+        )
+    }
+
+    #[cfg(not(feature = "native"))]
+    pub fn build(self, key: SecretKey) -> (Client, ClientReceiver) {
+        #[cfg(any(test, feature = "test-utils"))]
+        if self.insecure_skip_cert_verify {
+            warn!("Insecure config: SSL certificates from relay servers will be trusted without verification");
+            config
+                .dangerous()
+                .set_certificate_verifier(Arc::new(NoCertVerifier));
+        }
+
+        let public_key = key.public();
+
+        let inner = Actor {
+            secret_key: key,
+            can_ack_pings: self.can_ack_pings,
+            is_preferred: self.is_preferred,
+            relay_client: None,
+            is_closed: false,
+            address_family_selector: self.address_family_selector,
+            conn_gen: 0,
+            pings: PingTracker::default(),
+            ping_tasks: Default::default(),
+            url: self.url,
+            protocol: self.protocol,
             proxy_url: self.proxy_url,
         };
 
@@ -712,11 +763,12 @@ impl Actor {
     }
 
     /// Sends the HTTP upgrade request to the relay server.
+    #[cfg(feature = "native")]
     async fn start_upgrade<T>(io: T) -> Result<hyper::Response<Incoming>, ClientError>
     where
         T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
-        let io = hyper_util::rt::TokioIo::new(io);
+        let io = TokioIo::new(io);
         let (mut request_sender, connection) = hyper::client::conn::http1::Builder::new()
             .handshake(io)
             .await?;
@@ -780,7 +832,7 @@ impl Actor {
         self.ping_tasks.spawn(async move {
             let res = match connect_res {
                 Ok(client) => {
-                    let start = Instant::now();
+                    let start = std::time::Instant::now();
                     if let Err(err) = client.send_ping(ping).await {
                         warn!("failed to send ping: {:?}", err);
                         Err(ClientError::Send)
@@ -1036,6 +1088,7 @@ impl Actor {
     }
 }
 
+#[cfg(feature = "native")]
 async fn resolve_host(
     resolver: &DnsResolver,
     url: &Url,

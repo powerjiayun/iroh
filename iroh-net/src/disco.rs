@@ -139,6 +139,7 @@ pub struct Pong {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SendAddr {
     /// UDP, the ip addr.
+    #[cfg(feature = "native")]
     Udp(SocketAddr),
     /// Relay Url.
     Relay(RelayUrl),
@@ -154,11 +155,13 @@ impl SendAddr {
     pub fn relay_url(&self) -> Option<RelayUrl> {
         match self {
             Self::Relay(url) => Some(url.clone()),
+            #[cfg(feature = "native")]
             Self::Udp(_) => None,
         }
     }
 }
 
+#[cfg(feature = "native")]
 impl From<SocketAddr> for SendAddr {
     fn from(source: SocketAddr) -> Self {
         SendAddr::Udp(source)
@@ -175,6 +178,7 @@ impl PartialEq<SocketAddr> for SendAddr {
     fn eq(&self, other: &SocketAddr) -> bool {
         match self {
             Self::Relay(_) => false,
+            #[cfg(feature = "native")]
             Self::Udp(addr) => addr.eq(other),
         }
     }
@@ -184,6 +188,7 @@ impl Display for SendAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SendAddr::Relay(id) => write!(f, "Relay({})", id),
+            #[cfg(feature = "native")]
             SendAddr::Udp(addr) => write!(f, "UDP({})", addr),
         }
     }
@@ -231,6 +236,7 @@ impl Ping {
 fn send_addr_from_bytes(p: &[u8]) -> Result<SendAddr> {
     ensure!(p.len() > 2, "too short");
     match p[0] {
+        #[cfg(feature = "native")]
         0u8 => {
             let bytes: [u8; EP_LENGTH] = p[1..].try_into().context("invalid length")?;
             let addr = socket_addr_from_bytes(bytes);
@@ -254,6 +260,7 @@ fn send_addr_to_vec(addr: &SendAddr) -> Vec<u8> {
             out.extend_from_slice(url.to_string().as_bytes());
             out
         }
+        #[cfg(feature = "native")]
         SendAddr::Udp(ip) => {
             let mut out = vec![0u8];
             out.extend_from_slice(&socket_addr_as_bytes(ip));

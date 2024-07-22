@@ -2867,6 +2867,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.24.1",
  "tokio-rustls-acme",
+ "tokio-stream",
  "tokio-tungstenite",
  "tokio-tungstenite-wasm",
  "tokio-util",

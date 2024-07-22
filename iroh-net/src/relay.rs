@@ -13,6 +13,7 @@
 pub(crate) mod client;
 #[cfg(feature = "iroh-relay")]
 pub(crate) mod client_conn;
+#[cfg(feature = "iroh-relay")]
 pub(crate) mod clients;
 pub(crate) mod codec;
 pub mod http;

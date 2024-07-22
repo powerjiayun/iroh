@@ -8,10 +8,8 @@ use anyhow::{bail, Result};
 use bytes::Bytes;
 use hyper::upgrade::{Parts, Upgraded};
 use hyper_util::rt::TokioIo;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
-};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpStream;
 
 use crate::util::chain;
 

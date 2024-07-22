@@ -206,8 +206,26 @@ impl Client {
     ///
     /// This starts a connected actor in the background.  Once the client is dropped it will
     /// stop running.
+    #[cfg(feature = "native")]
     pub fn new(port_mapper: Option<portmapper::Client>, dns_resolver: DnsResolver) -> Result<Self> {
         let mut actor = Actor::new(port_mapper, dns_resolver)?;
+        let addr = actor.addr();
+        let task =
+            tokio::spawn(async move { actor.run().await }.instrument(info_span!("netcheck.actor")));
+        let drop_guard = CancelOnDrop::new("netcheck actor", task.abort_handle());
+        Ok(Client {
+            addr,
+            _drop_guard: Arc::new(drop_guard),
+        })
+    }
+
+    /// Creates a new netcheck client.
+    ///
+    /// This starts a connected actor in the background.  Once the client is dropped it will
+    /// stop running.
+    #[cfg(not(feature = "native"))]
+    pub fn new() -> Result<Self> {
+        let mut actor = Actor::new()?;
         let addr = actor.addr();
         let task =
             tokio::spawn(async move { actor.run().await }.instrument(info_span!("netcheck.actor")));
@@ -274,8 +292,6 @@ impl Client {
         stun_conn4: Option<Arc<UdpSocket>>,
         stun_conn6: Option<Arc<UdpSocket>>,
     ) -> Result<oneshot::Receiver<Result<Arc<Report>>>> {
-        // TODO: consider if RelayMap should be made to easily clone?  It seems expensive
-        // right now.
         let (tx, rx) = oneshot::channel();
         self.addr
             .send(Message::RunCheck {
@@ -398,6 +414,7 @@ struct Actor {
     ///
     /// The port mapper is responsible for talking to routers via UPnP and the like to try
     /// and open ports.
+    #[cfg(feature = "native")]
     port_mapper: Option<portmapper::Client>,
 
     // Actor state.
@@ -409,6 +426,7 @@ struct Actor {
     current_report_run: Option<ReportRun>,
 
     /// The DNS resolver to use for probes that need to perform DNS lookups
+    #[cfg(feature = "native")]
     dns_resolver: DnsResolver,
 }
 
@@ -417,6 +435,7 @@ impl Actor {
     ///
     /// This does not start the actor, see [`Actor::run`] for this.  You should not
     /// normally create this directly but rather create a [`Client`].
+    #[cfg(feature = "native")]
     fn new(port_mapper: Option<portmapper::Client>, dns_resolver: DnsResolver) -> Result<Self> {
         // TODO: consider an instrumented flume channel so we have metrics.
         let (sender, receiver) = mpsc::channel(32);
@@ -428,6 +447,23 @@ impl Actor {
             in_flight_stun_requests: Default::default(),
             current_report_run: None,
             dns_resolver,
+        })
+    }
+
+    /// Creates a new actor.
+    ///
+    /// This does not start the actor, see [`Actor::run`] for this.  You should not
+    /// normally create this directly but rather create a [`Client`].
+    #[cfg(not(feature = "native"))]
+    fn new() -> Result<Self> {
+        // TODO: consider an instrumented flume channel so we have metrics.
+        let (sender, receiver) = mpsc::channel(32);
+        Ok(Self {
+            receiver,
+            sender,
+            reports: Default::default(),
+            in_flight_stun_requests: Default::default(),
+            current_report_run: None,
         })
     }
 

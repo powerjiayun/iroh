@@ -148,6 +148,7 @@ impl Builder {
             node_map: self.node_map,
             discovery: self.discovery,
             proxy_url: self.proxy_url,
+            #[cfg(feature = "native")]
             dns_resolver,
             #[cfg(any(test, feature = "test-utils"))]
             insecure_skip_relay_cert_verify: self.insecure_skip_relay_cert_verify,
@@ -720,6 +721,7 @@ impl Endpoint {
     ///
     /// The [`Endpoint`] always binds on an IPv4 address and also tries to bind on an IPv6
     /// address if available.
+    #[cfg(feature = "native")]
     pub fn bound_sockets(&self) -> (SocketAddr, Option<SocketAddr>) {
         self.msock.local_addr()
     }
@@ -777,6 +779,7 @@ impl Endpoint {
     /// Returns the DNS resolver used in this [`Endpoint`].
     ///
     /// See [`Builder::discovery`].
+    #[cfg(feature = "native")]
     pub fn dns_resolver(&self) -> &DnsResolver {
         self.msock.dns_resolver()
     }
@@ -800,6 +803,7 @@ impl Endpoint {
     ///
     /// Even when the network did not change, or iroh was already able to detect
     /// the network change itself, there is no harm in calling this function.
+    #[cfg(feature = "native")]
     pub async fn network_change(&self) {
         self.msock.network_change().await;
     }

@@ -62,19 +62,26 @@ impl DnsDiscovery {
 
 impl Discovery for DnsDiscovery {
     fn resolve(&self, ep: Endpoint, node_id: NodeId) -> Option<BoxStream<Result<DiscoveryItem>>> {
-        let resolver = ep.dns_resolver().clone();
-        let origin_domain = self.origin_domain.clone();
-        let fut = async move {
-            let node_addr = resolver
-                .lookup_by_id_staggered(&node_id, &origin_domain, DNS_STAGGERING_MS)
-                .await?;
-            Ok(DiscoveryItem {
-                provenance: "dns",
-                last_updated: None,
-                addr_info: node_addr.info,
-            })
-        };
-        let stream = futures_lite::stream::once_future(fut);
-        Some(Box::pin(stream))
+        #[cfg(not(feature = "native"))]
+        {
+            None
+        }
+        #[cfg(feature = "native")]
+        {
+            let resolver = ep.dns_resolver().clone();
+            let origin_domain = self.origin_domain.clone();
+            let fut = async move {
+                let node_addr = resolver
+                    .lookup_by_id_staggered(&node_id, &origin_domain, DNS_STAGGERING_MS)
+                    .await?;
+                Ok(DiscoveryItem {
+                    provenance: "dns",
+                    last_updated: None,
+                    addr_info: node_addr.info,
+                })
+            };
+            let stream = futures_lite::stream::once_future(fut);
+            Some(Box::pin(stream))
+        }
     }
 }

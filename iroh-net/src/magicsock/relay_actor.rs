@@ -9,18 +9,19 @@ use std::{
 use anyhow::Context;
 use backoff::backoff::Backoff;
 use bytes::{Bytes, BytesMut};
+use futures_lite::StreamExt;
 use iroh_metrics::{inc, inc_by};
-use tokio::{
-    sync::{mpsc, oneshot},
-    task::{JoinHandle, JoinSet},
-    time,
-};
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, info_span, trace, warn, Instrument};
 
 use crate::{
     key::{PublicKey, PUBLIC_KEY_LENGTH},
     relay::{self, http::ClientError, ReceivedMessage, RelayUrl, MAX_PACKET_SIZE},
+    util::{
+        task::{self, JoinHandle, JoinSet},
+        time,
+    },
 };
 
 use super::{ActorMessage, MagicSock};
@@ -324,7 +325,7 @@ impl RelayActor {
                 Some(msg) = receiver.recv() => {
                     with_cancel(self.cancel_token.child_token(), self.handle_msg(msg)).await;
                 }
-                _ = cleanup_timer.tick() => {
+                _ = cleanup_timer.next() => {
                     trace!("tick: cleanup");
                     with_cancel(self.cancel_token.child_token(), self.clean_stale_relay()).await;
                 }
@@ -494,17 +495,20 @@ impl RelayActor {
         #[cfg(any(test, feature = "test-utils"))]
         let builder = builder.insecure_skip_cert_verify(self.msock.insecure_skip_relay_cert_verify);
 
+        #[cfg(feature = "native")]
         let (dc, dc_receiver) = builder.build(
             self.msock.secret_key.clone(),
             self.msock.dns_resolver.clone(),
         );
+        #[cfg(not(feature = "native"))]
+        let (dc, dc_receiver) = builder.build(self.msock.secret_key.clone());
 
         let (s, r) = mpsc::channel(64);
 
         let c = dc.clone();
         let msg_sender = self.msg_sender.clone();
         let url1 = url.clone();
-        let handle = tokio::task::spawn(
+        let handle = task::spawn(
             async move {
                 let ad = ActiveRelay::new(url1, c, dc_receiver, msg_sender);
 
