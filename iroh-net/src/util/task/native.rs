@@ -1,2 +1,2 @@
 pub use tokio::spawn;
-pub use tokio::task::{JoinError, JoinHandle, JoinSet};
+pub use tokio::task::{AbortHandle, JoinError, JoinHandle, JoinSet};

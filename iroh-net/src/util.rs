@@ -47,11 +47,11 @@ impl<T> Drop for AbortingJoinHandle<T> {
 #[derive(Debug, Clone)]
 pub struct SharedAbortingJoinHandle<T: Clone + Send> {
     fut: Shared<BoxFuture<std::result::Result<T, String>>>,
-    abort: Arc<tokio::task::AbortHandle>,
+    abort: Arc<task::AbortHandle>,
 }
 
-impl<T: Clone + Send + 'static> From<tokio::task::JoinHandle<T>> for SharedAbortingJoinHandle<T> {
-    fn from(handle: tokio::task::JoinHandle<T>) -> Self {
+impl<T: Clone + Send + 'static> From<task::JoinHandle<T>> for SharedAbortingJoinHandle<T> {
+    fn from(handle: task::JoinHandle<T>) -> Self {
         let abort = handle.abort_handle();
         let fut: BoxFuture<std::result::Result<T, String>> =
             Box::pin(async move { handle.await.map_err(|e| e.to_string()) });
@@ -85,12 +85,12 @@ impl<T: Clone + Send> Drop for SharedAbortingJoinHandle<T> {
 pub struct CancelOnDrop {
     task_name: &'static str,
     #[debug(skip)]
-    handle: tokio::task::AbortHandle,
+    handle: task::AbortHandle,
 }
 
 impl CancelOnDrop {
     /// Create a [`CancelOnDrop`] with a name and a handle to a task.
-    pub fn new(task_name: &'static str, handle: tokio::task::AbortHandle) -> Self {
+    pub fn new(task_name: &'static str, handle: task::AbortHandle) -> Self {
         CancelOnDrop { task_name, handle }
     }
 }

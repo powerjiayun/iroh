@@ -1,12 +1,12 @@
 //! Actor which coordinates the congestion controller for the magic socket
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use futures_concurrency::stream::stream_group;
 use futures_lite::StreamExt;
 use iroh_base::key::NodeId;
 use tokio::sync::{mpsc, Notify};
-use tokio::time::Duration;
 use tracing::{debug, error, info_span, trace, warn, Instrument};
 
 use crate::magicsock::{ConnectionType, ConnectionTypeStream};

@@ -2,15 +2,15 @@
 //!
 //! [pkarr]: https://pkarr.org
 
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::{anyhow, bail, Result};
 use futures_util::stream::BoxStream;
 use pkarr::SignedPacket;
-use tokio::{
-    task::JoinHandle,
-    time::{Duration, Instant},
-};
+use tokio::task::JoinHandle;
 use tracing::{debug, error_span, info, warn, Instrument};
 use url::Url;
 
@@ -117,7 +117,7 @@ impl PkarrPublisher {
             (None, info.direct_addresses.clone())
         };
         let info = NodeInfo::new(self.node_id, relay_url, direct_addresses);
-        self.watchable.update(Some(info)).ok();
+        self.watchable.set(Some(info)).ok();
     }
 }
 
@@ -154,7 +154,7 @@ impl PublisherService {
         let republish = time::sleep(Duration::MAX);
         tokio::pin!(republish);
         loop {
-            if let Some(info) = self.watcher.get() {
+            if let Some(info) = self.watcher.get().clone() {
                 if let Err(err) = self.publish_current(info).await {
                     warn!(?err, url = %self.pkarr_client.pkarr_relay_url , "Failed to publish to pkarr");
                     failed_attempts += 1;

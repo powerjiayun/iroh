@@ -13,17 +13,16 @@
 //! requests to it will fail which is intentional.
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use tokio::sync::oneshot;
-use tokio::time::Instant;
 use tracing::{debug, error, info_span, trace, warn, Instrument};
 
 use crate::net::UdpSocket;
 use crate::netcheck::{self, reportgen, Inflight};
 use crate::stun;
-use crate::util::CancelOnDrop;
+use crate::util::{task, time, CancelOnDrop};
 
 /// The amount of time we wait for a hairpinned packet to come back.
 const HAIRPIN_CHECK_TIMEOUT: Duration = Duration::from_millis(100);
@@ -48,7 +47,7 @@ impl Client {
         };
 
         let task =
-            tokio::spawn(async move { actor.run().await }.instrument(info_span!("hairpin.actor")));
+            task::spawn(async move { actor.run().await }.instrument(info_span!("hairpin.actor")));
         Self {
             addr: Some(addr),
             _drop_guard: CancelOnDrop::new("hairpin actor", task.abort_handle()),
@@ -132,7 +131,7 @@ impl Actor {
         }
 
         let now = Instant::now();
-        let hairpinning_works = match tokio::time::timeout(HAIRPIN_CHECK_TIMEOUT, stun_rx).await {
+        let hairpinning_works = match time::timeout(HAIRPIN_CHECK_TIMEOUT, stun_rx).await {
             Ok(Ok(_)) => true,
             Ok(Err(_)) => bail!("netcheck actor dropped stun response channel"),
             Err(_) => false, // Elapsed

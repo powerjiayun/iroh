@@ -37,11 +37,7 @@ use iroh_metrics::{inc, inc_by};
 use quinn::AsyncUdpSocket;
 use rand::{seq::SliceRandom, Rng, SeedableRng};
 use smallvec::{smallvec, SmallVec};
-use tokio::{
-    sync::{self, mpsc, Mutex},
-    task::JoinSet,
-    time,
-};
+use tokio::sync::{self, mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 use tracing::{
     debug, error, error_span, event, info, info_span, instrument, trace, trace_span, warn,
@@ -57,6 +53,8 @@ use crate::{
     netcheck,
     relay::{RelayMap, RelayUrl},
     stun,
+    util::task::{self, JoinHandle, JoinSet},
+    util::time,
     util::watchable::{Watchable, Watcher},
     AddrInfo,
 };
@@ -1447,7 +1445,7 @@ impl Handle {
         #[cfg(feature = "native")]
         let net_checker = netcheck::Client::new(Some(port_mapper.clone()), dns_resolver.clone())?;
         #[cfg(not(feature = "native"))]
-        let net_checker = netcheck::Client::new(None)?;
+        let net_checker = netcheck::Client::new()?;
 
         let (actor_sender, actor_receiver) = mpsc::channel(256);
         let (relay_actor_sender, relay_actor_receiver) = mpsc::channel(256);
@@ -1757,6 +1755,7 @@ enum ActorMessage {
     EndpointPingExpired(usize, stun::TransactionId),
     #[cfg(feature = "native")]
     NetcheckReport(Result<Option<Arc<netcheck::Report>>>, &'static str),
+    #[cfg(feature = "native")]
     NetworkChange,
     #[cfg(test)]
     ForceNetworkChange(bool),
@@ -1793,6 +1792,7 @@ struct Actor {
     /// The prober that discovers local network conditions, including the closest relay relay and NAT mappings.
     net_checker: netcheck::Client,
 
+    #[cfg(feature = "native")]
     network_monitor: netmon::Monitor,
 }
 
@@ -1873,11 +1873,11 @@ impl Actor {
                         return Ok(());
                     }
                 }
-                tick = self.periodic_re_stun_timer.tick() => {
+                tick = self.periodic_re_stun_timer.next() => {
                     trace!("tick: re_stun {:?}", tick);
                     self.msock.re_stun("periodic");
                 }
-                _ = endpoint_heartbeat_timer.tick() => {
+                _ = endpoint_heartbeat_timer.next() => {
                     trace!("tick: endpoint heartbeat {} endpoints", self.msock.node_map.node_count());
                     // TODO: this might trigger too many packets at once, pace this
 
@@ -1985,6 +1985,7 @@ impl Actor {
                 }
                 self.finalize_endpoints_update(why);
             }
+            #[cfg(feature = "native")]
             ActorMessage::NetworkChange => {
                 self.network_monitor.network_change().await.ok();
             }
@@ -2086,7 +2087,7 @@ impl Actor {
     /// Stores the results of a successful endpoint update.
     async fn store_endpoints_update(&mut self, nr: Option<Arc<netcheck::Report>>) {
         // endpoint -> how it was found
-        let mut already = HashMap::new();
+        let mut already: HashMap<SocketAddr, _> = HashMap::new();
         // unique endpoints
         let mut eps = Vec::new();
 
@@ -2835,6 +2836,10 @@ impl NetInfo {
             (Some(slf), Some(other)) => slf == other,
             _ => true, // ignore for comparison if only one report had this info
         };
+        #[cfg(feature = "native")]
+        let probes_eq = self.portmap_probe == other.portmap_probe;
+        #[cfg(not(feature = "native"))]
+        let probes_eq = true;
         self.mapping_varies_by_dest_ip == other.mapping_varies_by_dest_ip
             && self.hair_pinning == other.hair_pinning
             && self.working_ipv6 == other.working_ipv6
@@ -2843,7 +2848,7 @@ impl NetInfo {
             && eq_icmp_v4
             && eq_icmp_v6
             && self.have_port_map == other.have_port_map
-            && self.portmap_probe == other.portmap_probe
+            && probes_eq
             && self.preferred_relay == other.preferred_relay
     }
 }

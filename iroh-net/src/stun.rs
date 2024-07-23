@@ -11,9 +11,11 @@ pub use stun_rs::{
     TransactionId,
 };
 
+#[cfg(feature = "native")]
 use crate::net::ip::to_canonical;
 
 /// Errors that can occur when handling a STUN packet.
+#[cfg(feature = "native")]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The STUN message could not be parsed or is otherwise invalid.
@@ -37,6 +39,7 @@ pub enum Error {
 }
 
 /// Generates a binding request STUN packet.
+#[cfg(feature = "native")]
 pub fn request(tx: TransactionId) -> Vec<u8> {
     let fp = Fingerprint::default();
     let msg = StunMessageBuilder::new(methods::BINDING, MessageClass::Request)
@@ -52,6 +55,7 @@ pub fn request(tx: TransactionId) -> Vec<u8> {
 }
 
 /// Generates a binding response.
+#[cfg(feature = "native")]
 pub fn response(tx: TransactionId, addr: SocketAddr) -> Vec<u8> {
     let msg = StunMessageBuilder::new(methods::BINDING, MessageClass::SuccessResponse)
         .with_transaction_id(tx)
@@ -77,6 +81,7 @@ pub fn is(b: &[u8]) -> bool {
 }
 
 /// Parses a STUN binding request.
+#[cfg(feature = "native")]
 pub fn parse_binding_request(b: &[u8]) -> Result<TransactionId, Error> {
     let ctx = DecoderContextBuilder::default()
         .with_validation() // ensure fingerprint is validated
@@ -105,6 +110,7 @@ pub fn parse_binding_request(b: &[u8]) -> Result<TransactionId, Error> {
 
 /// Parses a successful binding response STUN packet.
 /// The IP address is extracted from the XOR-MAPPED-ADDRESS attribute.
+#[cfg(feature = "native")]
 pub fn parse_response(b: &[u8]) -> Result<(TransactionId, SocketAddr), Error> {
     let decoder = MessageDecoder::default();
     let (msg, _) = decoder.decode(b).map_err(|_| Error::InvalidMessage)?;

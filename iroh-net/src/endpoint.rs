@@ -26,10 +26,11 @@ use tokio_util::sync::{CancellationToken, WaitForCancellationFuture};
 use tracing::{debug, info_span, trace, warn};
 use url::Url;
 
+#[cfg(feature = "native")]
+use crate::dns::{default_resolver, DnsResolver};
 use crate::{
     defaults,
     discovery::{Discovery, DiscoveryTask},
-    dns::{default_resolver, DnsResolver},
     key::{PublicKey, SecretKey},
     magicsock::{self, Handle},
     relay::{RelayMap, RelayMode, RelayUrl},
@@ -77,6 +78,7 @@ pub struct Builder {
     proxy_url: Option<Url>,
     /// List of known nodes. See [`Builder::known_nodes`].
     node_map: Option<Vec<NodeAddr>>,
+    #[cfg(feature = "native")]
     dns_resolver: Option<DnsResolver>,
     #[cfg(any(test, feature = "test-utils"))]
     insecure_skip_relay_cert_verify: bool,
@@ -100,6 +102,7 @@ impl Default for Builder {
             discovery: Default::default(),
             proxy_url: None,
             node_map: None,
+            #[cfg(feature = "native")]
             dns_resolver: None,
             #[cfg(any(test, feature = "test-utils"))]
             insecure_skip_relay_cert_verify: false,
@@ -137,6 +140,7 @@ impl Builder {
             concurrent_connections: self.concurrent_connections,
             secret_key: secret_key.clone(),
         };
+        #[cfg(feature = "native")]
         let dns_resolver = self
             .dns_resolver
             .unwrap_or_else(|| default_resolver().clone());
@@ -244,6 +248,7 @@ impl Builder {
     /// By default, all endpoints share a DNS resolver, which is configured to use the
     /// host system's DNS configuration. You can pass a custom instance of [`DnsResolver`]
     /// here to use a differently configured DNS resolver for this endpoint.
+    #[cfg(feature = "native")]
     pub fn dns_resolver(mut self, dns_resolver: DnsResolver) -> Self {
         self.dns_resolver = Some(dns_resolver);
         self

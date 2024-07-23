@@ -904,7 +904,7 @@ impl NodeState {
                 let mut node_map_insert = None;
 
                 let now = Instant::now();
-                let latency = now - sp.at;
+                let latency = now.duration_since(sp.at);
 
                 debug!(
                     tx = %hex::encode(m.tx_id),

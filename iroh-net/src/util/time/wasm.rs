@@ -5,7 +5,6 @@ use std::{
 };
 
 pub use gloo_timers::future::IntervalStream as Interval;
-pub use web_time::{Duration, Instant};
 
 /// Errors returned by `Timeout`.
 ///

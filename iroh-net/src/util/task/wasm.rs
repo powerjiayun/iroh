@@ -9,6 +9,7 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
+use derive_more::Display;
 use futures_lite::{stream::StreamExt, Stream};
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -65,6 +66,12 @@ impl<T> JoinHandle<T> {
         self.result.lock().expect("lock poinsoned").is_some()
     }
 
+    pub fn abort_handle(&self) -> AbortHandle {
+        AbortHandle {
+            cancelled: self.cancelled.clone(),
+        }
+    }
+
     fn register_handle_waker(&self, cx: &mut Context<'_>) {
         let mut guard = self.handle_waker.lock().expect("lock poisoned");
         *guard = Some(cx.waker().clone());
@@ -85,8 +92,20 @@ impl<T> JoinHandle<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
+pub struct AbortHandle {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl AbortHandle {
+    pub fn abort(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+}
+
+#[derive(Debug, Clone, Copy, Display)]
 pub enum JoinError {
+    #[display("Task cancelled")]
     Cancelled,
 }
 
@@ -125,6 +144,10 @@ impl<T> JoinSet<T> {
         }
 
         Poll::Pending
+    }
+
+    pub async fn shutdown(&mut self) {
+        self.count().await;
     }
 }
 
