@@ -1830,7 +1830,7 @@ impl Actor {
                         return Ok(());
                     }
                 }
-                tick = self.periodic_re_stun_timer.tick() => {
+                tick = self.periodic_re_stun_timer.next() => {
                     trace!("tick: re_stun {:?}", tick);
                     self.msock.re_stun("periodic");
                 }
@@ -1840,7 +1840,7 @@ impl Actor {
                     debug!("external address updated: {new_external_address:?}");
                     self.msock.re_stun("portmap_updated");
                 },
-                _ = endpoint_heartbeat_timer.tick() => {
+                _ = endpoint_heartbeat_timer.next() => {
                     trace!("tick: endpoint heartbeat {} endpoints", self.msock.node_map.node_count());
                     // TODO: this might trigger too many packets at once, pace this
 

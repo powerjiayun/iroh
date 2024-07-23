@@ -30,5 +30,4 @@ pub use self::codec::MAX_PACKET_SIZE;
 pub use self::http::Client as HttpClient;
 pub use self::map::{RelayMap, RelayMode, RelayNode};
 pub use self::metrics::Metrics;
-// pub use self::server::{ClientConnHandler, MaybeTlsStream as MaybeTlsStreamServer, Server};
 pub use iroh_base::node_addr::RelayUrl;

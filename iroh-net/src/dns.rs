@@ -16,6 +16,8 @@ use iroh_base::key::NodeId;
 use iroh_base::node_addr::NodeAddr;
 use once_cell::sync::Lazy;
 
+use crate::node_info;
+
 /// The DNS resolver type used throughout `iroh-net`.
 pub type DnsResolver = TokioAsyncResolver;
 

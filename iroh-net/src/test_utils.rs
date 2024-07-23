@@ -341,7 +341,7 @@ pub(crate) mod pkarr_dns_state {
         time::Duration,
     };
 
-    use crate::dns::node_info::{node_id_from_hickory_name, NodeInfo};
+    use crate::node_info::{node_id_from_hickory_name, NodeInfo};
     use crate::test_utils::dns_server::QueryHandler;
     use crate::NodeId;
 
