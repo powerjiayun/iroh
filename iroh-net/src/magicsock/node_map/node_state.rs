@@ -11,12 +11,13 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{debug, event, info, instrument, trace, warn, Level};
 
+#[cfg(feature = "native")]
+use crate::net::ip::is_unicast_link_local;
 use crate::{
     disco::{self, SendAddr},
     endpoint::AddrInfo,
     key::PublicKey,
     magicsock::{Timer, HEARTBEAT_INTERVAL},
-    net::ip::is_unicast_link_local,
     relay::RelayUrl,
     stun,
     util::{

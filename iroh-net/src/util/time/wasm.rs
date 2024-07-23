@@ -5,6 +5,7 @@ use std::{
 };
 
 pub use gloo_timers::future::IntervalStream as Interval;
+pub use web_time::{Duration, Instant};
 
 /// Errors returned by `Timeout`.
 ///
@@ -19,6 +20,7 @@ impl std::fmt::Display for Elapsed {
     }
 }
 
+/// TODO(matheus23): DOCS
 pub async fn timeout<T, F>(delay: std::time::Duration, fut: F) -> Result<T, Elapsed>
 where
     F: std::future::Future<Output = T>,
@@ -34,17 +36,22 @@ where
     }
 }
 
+/// TODO(matheus23): DOCS
 pub fn interval(dur: std::time::Duration) -> Interval {
     Interval::new(u32::try_from(dur.as_millis()).expect("interval too large"))
 }
 
+/// TODO(matheus23): DOCS
 pub fn interval_at(start: Instant, dur: std::time::Duration) -> Interval {
     todo!()
 }
 
+/// TODO(matheus23): DOCS
+#[derive(Debug)]
 #[pin_project::pin_project]
 pub struct Sleep(#[pin] gloo_timers::future::TimeoutFuture);
 
+/// TODO(matheus23): DOCS
 pub fn sleep(duration: std::time::Duration) -> Sleep {
     Sleep(gloo_timers::future::sleep(duration))
 }
@@ -58,6 +65,7 @@ impl Future for Sleep {
 }
 
 impl Sleep {
+    /// TODO(matheus23): DOCS
     pub fn reset(mut self: Pin<&mut Self>, deadline: Instant) {
         let duration = deadline.saturating_duration_since(Instant::now());
         self.set(sleep(duration));

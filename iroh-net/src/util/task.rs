@@ -1,3 +1,5 @@
+//! TODO(matheus23): DOCS
+
 #[cfg(not(feature = "wasm"))]
 mod native;
 #[cfg(feature = "wasm")]

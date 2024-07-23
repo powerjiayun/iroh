@@ -407,12 +407,10 @@ impl Endpoint {
         // the packet if grease_quic_bit is set to false.
         endpoint_config.grease_quic_bit(false);
 
-        let runtime = {
-            #[cfg(not(feature = "wasm"))]
-            quinn::TokioRuntime
-            #[cfg(feature = "wasm")]
-            quinn::WasmRuntime
-        };
+        #[cfg(feature = "wasm")]
+        let runtime = quinn::WasmRuntime;
+        #[cfg(not(feature = "wasm"))]
+        let runtime = quinn::TokioRuntime;
 
         let endpoint = quinn::Endpoint::new_with_abstract_socket(
             endpoint_config,

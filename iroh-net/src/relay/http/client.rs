@@ -382,6 +382,7 @@ impl ClientBuilder {
         )
     }
 
+    /// TODO(matheus23): DOCS
     #[cfg(not(feature = "native"))]
     pub fn build(self, key: SecretKey) -> (Client, ClientReceiver) {
         #[cfg(any(test, feature = "test-utils"))]

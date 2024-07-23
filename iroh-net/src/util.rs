@@ -7,13 +7,15 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures_lite::future::Boxed as BoxFuture;
 use futures_util::{future::Shared, FutureExt};
 
 pub mod chain;
+pub mod futures;
 pub mod task;
 pub mod time;
 pub mod watchable;
+
+pub use futures::*;
 
 /// A join handle that owns the task it is running, and aborts it when dropped.
 #[derive(Debug, derive_more::Deref)]

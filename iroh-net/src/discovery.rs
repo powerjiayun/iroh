@@ -42,7 +42,7 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, ensure, Result};
-use futures_lite::stream::{Boxed as BoxStream, StreamExt};
+use futures_lite::stream::StreamExt;
 use iroh_base::node_addr::NodeAddr;
 use tokio::sync::oneshot;
 use tracing::{debug, error_span, warn, Instrument};
@@ -50,7 +50,7 @@ use tracing::{debug, error_span, warn, Instrument};
 use crate::{
     util::{
         task::{self, JoinHandle},
-        time,
+        time, BoxStream,
     },
     AddrInfo, Endpoint, NodeId,
 };

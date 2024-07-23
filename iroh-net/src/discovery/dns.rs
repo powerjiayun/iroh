@@ -1,11 +1,12 @@
 //! DNS node discovery for iroh-net
 
 use anyhow::Result;
-use futures_lite::stream::Boxed as BoxStream;
 
+#[cfg(feature = "native")]
+use crate::dns::ResolverExt;
 use crate::{
     discovery::{Discovery, DiscoveryItem},
-    dns::ResolverExt,
+    util::BoxStream,
     Endpoint, NodeId,
 };
 

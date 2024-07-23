@@ -13,6 +13,7 @@ use derive_more::Display;
 use futures_lite::{stream::StreamExt, Stream};
 use wasm_bindgen::prelude::wasm_bindgen;
 
+/// TODO(matheus23): DOCS
 pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
 where
     F: Future + 'static,
@@ -28,6 +29,7 @@ where
     handle
 }
 
+/// TODO(matheus23): DOCS
 #[derive(Debug)]
 pub struct JoinHandle<T> {
     cancelled: Arc<AtomicBool>,
@@ -48,6 +50,7 @@ impl<T> Clone for JoinHandle<T> {
 }
 
 impl<T> JoinHandle<T> {
+    /// TODO(matheus23): DOCS
     pub fn new() -> Self {
         JoinHandle {
             cancelled: Arc::new(AtomicBool::new(false)),
@@ -57,15 +60,18 @@ impl<T> JoinHandle<T> {
         }
     }
 
+    /// TODO(matheus23): DOCS
     pub fn abort(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
         self.wake();
     }
 
+    /// TODO(matheus23): DOCS
     pub fn is_finished(&self) -> bool {
         self.result.lock().expect("lock poinsoned").is_some()
     }
 
+    /// TODO(matheus23): DOCS
     pub fn abort_handle(&self) -> AbortHandle {
         AbortHandle {
             cancelled: self.cancelled.clone(),
@@ -92,19 +98,23 @@ impl<T> JoinHandle<T> {
     }
 }
 
+/// TODO(matheus23): DOCS
 #[derive(Debug, Clone)]
 pub struct AbortHandle {
     cancelled: Arc<AtomicBool>,
 }
 
 impl AbortHandle {
+    /// TODO(matheus23): DOCS
     pub fn abort(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
     }
 }
 
+/// TODO(matheus23): DOCS
 #[derive(Debug, Clone, Copy, Display)]
 pub enum JoinError {
+    /// TODO(matheus23): DOCS
     #[display("Task cancelled")]
     Cancelled,
 }
@@ -126,6 +136,7 @@ impl<T> Future for JoinHandle<T> {
     }
 }
 
+/// TODO(matheus23): DOCS
 #[derive(Debug)]
 pub struct JoinSet<T> {
     handles: Vec<JoinHandle<T>>,
@@ -146,6 +157,7 @@ impl<T> JoinSet<T> {
         Poll::Pending
     }
 
+    /// TODO(matheus23): DOCS
     pub async fn shutdown(&mut self) {
         self.count().await;
     }
@@ -181,6 +193,7 @@ impl<T> Stream for JoinSet<T> {
 }
 
 impl<T> JoinSet<T> {
+    /// TODO(matheus23): DOCS
     pub fn new() -> Self {
         Self {
             handles: Vec::new(),
@@ -197,6 +210,7 @@ impl<T> JoinSet<T> {
         self.handles.is_empty()
     }
 
+    /// TODO(matheus23): DOCS
     pub fn spawn(&mut self, fut: impl Future<Output = T> + 'static) -> JoinHandle<T>
     where
         T: 'static,
@@ -206,12 +220,14 @@ impl<T> JoinSet<T> {
         handle
     }
 
+    /// TODO(matheus23): DOCS
     pub fn abort_all(&self) {
         for handle in self.handles.iter() {
             handle.abort();
         }
     }
 
+    /// TODO(matheus23): DOCS
     pub async fn join_next(&mut self) -> Option<Result<T, JoinError>> {
         self.next().await
     }

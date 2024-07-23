@@ -36,6 +36,14 @@ pub struct Watchable<T> {
     shared: Arc<Shared<T>>,
 }
 
+impl<T> Clone for Watchable<T> {
+    fn clone(&self) -> Self {
+        Self {
+            shared: self.shared.clone(),
+        }
+    }
+}
+
 /// The watcher watching the watchable.
 #[derive(Debug, Clone)]
 pub struct Watcher<T> {

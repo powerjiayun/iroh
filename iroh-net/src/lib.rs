@@ -130,6 +130,7 @@ pub mod metrics;
 #[cfg(feature = "native")]
 pub mod net;
 pub mod netcheck;
+pub mod node_info;
 #[cfg(feature = "native")]
 pub mod ping;
 #[cfg(feature = "native")]

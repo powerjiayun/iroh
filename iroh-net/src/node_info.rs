@@ -42,6 +42,7 @@ use std::{
 
 use anyhow::{anyhow, ensure, Result};
 use hickory_proto::error::ProtoError;
+#[cfg(feature = "native")]
 use hickory_resolver::{Name, TokioAsyncResolver};
 use url::Url;
 
@@ -263,6 +264,7 @@ impl<T: FromStr + Display + Hash + Ord> TxtAttrs<T> {
         Ok(Self { attrs, node_id })
     }
 
+    #[cfg(feature = "native")]
     async fn lookup(resolver: &TokioAsyncResolver, name: Name) -> Result<Self> {
         let name = ensure_iroh_txt_label(name)?;
         let lookup = resolver.txt_lookup(name).await?;
@@ -271,6 +273,7 @@ impl<T: FromStr + Display + Hash + Ord> TxtAttrs<T> {
     }
 
     /// Looks up attributes by [`NodeId`] and origin domain.
+    #[cfg(feature = "native")]
     pub async fn lookup_by_id(
         resolver: &TokioAsyncResolver,
         node_id: &NodeId,
@@ -281,6 +284,7 @@ impl<T: FromStr + Display + Hash + Ord> TxtAttrs<T> {
     }
 
     /// Looks up attributes by DNS name.
+    #[cfg(feature = "native")]
     pub async fn lookup_by_name(resolver: &TokioAsyncResolver, name: &str) -> Result<Self> {
         let name = Name::from_str(name)?;
         TxtAttrs::lookup(resolver, name).await
@@ -394,6 +398,7 @@ impl<T: FromStr + Display + Hash + Ord> TxtAttrs<T> {
     }
 }
 
+#[cfg(feature = "native")]
 fn ensure_iroh_txt_label(name: Name) -> Result<Name, ProtoError> {
     if name.iter().next() == Some(IROH_TXT_NAME.as_bytes()) {
         Ok(name)
@@ -402,6 +407,7 @@ fn ensure_iroh_txt_label(name: Name) -> Result<Name, ProtoError> {
     }
 }
 
+#[cfg(feature = "native")]
 fn node_domain(node_id: &NodeId, origin: &str) -> Result<Name> {
     let domain = format!("{}.{}", to_z32(node_id), origin);
     let domain = Name::from_str(&domain)?;
