@@ -619,7 +619,8 @@ mod test_dns_pkarr {
 
     use crate::{
         discovery::pkarr::PkarrPublisher,
-        dns::{node_info::NodeInfo, ResolverExt},
+        dns::ResolverExt,
+        node_info::NodeInfo,
         relay::{RelayMap, RelayMode},
         test_utils::{
             dns_server::{create_dns_resolver, run_dns_server},

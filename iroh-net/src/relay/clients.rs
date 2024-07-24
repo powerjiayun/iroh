@@ -262,8 +262,8 @@ mod tests {
         key::SecretKey,
         relay::{
             codec::{recv_frame, DerpCodec, Frame, FrameType},
+            server::MaybeTlsStream,
             server::RelayIo,
-            MaybeTlsStreamServer as MaybeTlsStream,
         },
     };
 

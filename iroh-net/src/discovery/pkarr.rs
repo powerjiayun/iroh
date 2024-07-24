@@ -151,7 +151,8 @@ impl PublisherService {
         let republish = time::sleep(Duration::MAX);
         tokio::pin!(republish);
         loop {
-            if let Some(info) = self.watcher.get().clone() {
+            let maybe_info = { (*self.watcher.get()).clone() };
+            if let Some(info) = maybe_info {
                 if let Err(err) = self.publish_current(info).await {
                     warn!(?err, url = %self.pkarr_client.pkarr_relay_url , "Failed to publish to pkarr");
                     failed_attempts += 1;
