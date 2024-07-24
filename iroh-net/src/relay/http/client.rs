@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
 
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use bytes::Bytes;
@@ -38,6 +37,7 @@ use crate::relay::{
     client::Client as RelayClient, client::ClientBuilder as RelayClientBuilder,
     client::ClientReceiver as RelayClientReceiver, ReceivedMessage,
 };
+use crate::util::time::Duration;
 use crate::util::{chain, time};
 use crate::util::{
     task::{self, JoinSet},
@@ -833,7 +833,7 @@ impl Actor {
         self.ping_tasks.spawn(async move {
             let res = match connect_res {
                 Ok(client) => {
-                    let start = std::time::Instant::now();
+                    let start = crate::util::time::Instant::now();
                     if let Err(err) = client.send_ping(ping).await {
                         warn!("failed to send ping: {:?}", err);
                         Err(ClientError::Send)

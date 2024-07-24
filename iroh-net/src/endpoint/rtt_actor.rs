@@ -1,7 +1,6 @@
 //! Actor which coordinates the congestion controller for the magic socket
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use futures_concurrency::stream::stream_group;
 use futures_lite::StreamExt;
@@ -12,6 +11,7 @@ use tracing::{debug, error, info_span, trace, warn, Instrument};
 use crate::magicsock::{ConnectionType, ConnectionTypeStream};
 use crate::util::task::{self, JoinHandle};
 use crate::util::time;
+use crate::util::time::Duration;
 
 #[derive(Debug)]
 pub(super) struct RttHandle {

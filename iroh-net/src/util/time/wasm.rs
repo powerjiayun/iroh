@@ -21,7 +21,7 @@ impl std::fmt::Display for Elapsed {
 }
 
 /// TODO(matheus23): DOCS
-pub async fn timeout<T, F>(delay: std::time::Duration, fut: F) -> Result<T, Elapsed>
+pub async fn timeout<T, F>(delay: Duration, fut: F) -> Result<T, Elapsed>
 where
     F: std::future::Future<Output = T>,
 {
@@ -37,12 +37,12 @@ where
 }
 
 /// TODO(matheus23): DOCS
-pub fn interval(dur: std::time::Duration) -> Interval {
+pub fn interval(dur: Duration) -> Interval {
     Interval::new(u32::try_from(dur.as_millis()).expect("interval too large"))
 }
 
 /// TODO(matheus23): DOCS
-pub fn interval_at(start: Instant, dur: std::time::Duration) -> Interval {
+pub fn interval_at(start: Instant, dur: Duration) -> Interval {
     todo!()
 }
 
@@ -52,7 +52,7 @@ pub fn interval_at(start: Instant, dur: std::time::Duration) -> Interval {
 pub struct Sleep(#[pin] gloo_timers::future::TimeoutFuture);
 
 /// TODO(matheus23): DOCS
-pub fn sleep(duration: std::time::Duration) -> Sleep {
+pub fn sleep(duration: Duration) -> Sleep {
     Sleep(gloo_timers::future::sleep(duration))
 }
 

@@ -4,7 +4,6 @@ use std::{
     net::{IpAddr, SocketAddr},
     pin::Pin,
     task::{Context, Poll},
-    time::Instant,
 };
 
 use futures_lite::stream::Stream;
@@ -21,6 +20,7 @@ use self::{
 use super::{
     metrics::Metrics as MagicsockMetrics, ActorMessage, DiscoMessageSource, QuicMappedAddr,
 };
+use crate::util::time::Instant;
 use crate::{
     disco::{CallMeMaybe, Pong, SendAddr},
     key::PublicKey,

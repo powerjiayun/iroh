@@ -4,8 +4,9 @@ use std::{
     fmt::Debug,
     net::IpAddr,
     sync::{Arc, Mutex},
-    time::Duration,
 };
+
+use crate::util::time::Duration;
 
 use anyhow::{Context, Result};
 use surge_ping::{Client, Config, IcmpPacket, PingIdentifier, PingSequence, ICMP};

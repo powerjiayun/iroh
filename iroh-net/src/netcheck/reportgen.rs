@@ -20,7 +20,6 @@ use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use iroh_metrics::inc;
@@ -46,6 +45,7 @@ use crate::portmapper;
 use crate::relay::{RelayMap, RelayNode, RelayUrl};
 #[cfg(feature = "native")]
 use crate::stun;
+use crate::util::time::{Duration, Instant};
 use crate::util::{
     task::{self, JoinHandle, JoinSet},
     time, CancelOnDrop, MaybeFuture,

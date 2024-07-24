@@ -7,7 +7,6 @@
 
 use std::fmt::Write;
 use std::net::{IpAddr, Ipv6Addr};
-use std::time::Duration;
 
 use anyhow::Result;
 use futures_lite::{Future, StreamExt};
@@ -17,6 +16,7 @@ use iroh_base::node_addr::NodeAddr;
 use once_cell::sync::Lazy;
 
 use crate::node_info;
+use crate::util::time::Duration;
 
 /// The DNS resolver type used throughout `iroh-net`.
 pub type DnsResolver = TokioAsyncResolver;
@@ -351,7 +351,7 @@ async fn stagger_call<T, F: Fn() -> Fut, Fut: Future<Output = Result<T>>>(
     // NOTE: we add the 0 delay here to have a uniform set of futures. This is more performant than
     // using alternatives that allow futures of different types.
     for delay in std::iter::once(&0u64).chain(delays_ms) {
-        let delay = std::time::Duration::from_millis(*delay);
+        let delay = crate::util::time::Duration::from_millis(*delay);
         let fut = f();
         let staggered_fut = async move {
             tokio::time::sleep(delay).await;

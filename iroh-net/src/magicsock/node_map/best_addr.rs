@@ -1,14 +1,12 @@
 //! The [`BestAddr`] is the currently active best address for UDP sends.
 
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use std::net::SocketAddr;
 
 use iroh_metrics::inc;
 use tracing::{debug, info};
 
 use crate::magicsock::metrics::Metrics as MagicsockMetrics;
+use crate::util::time::{Duration, Instant};
 
 /// How long we trust a UDP address as the exclusive path (without using relay) without having heard a Pong reply.
 const TRUST_UDP_ADDR_DURATION: Duration = Duration::from_millis(6500);

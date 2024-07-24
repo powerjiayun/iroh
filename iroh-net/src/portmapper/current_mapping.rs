@@ -8,8 +8,9 @@ use std::{
     task::Poll,
 };
 
+use crate::util::time::Duration;
+
 use iroh_metrics::inc;
-use std::time::Duration;
 use tokio::{sync::watch, time};
 use tracing::{debug, trace};
 

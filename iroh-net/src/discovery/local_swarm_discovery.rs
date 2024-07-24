@@ -6,7 +6,6 @@
 use std::{
     collections::{BTreeSet, HashMap},
     net::{IpAddr, SocketAddr},
-    time::Duration,
 };
 
 use anyhow::Result;
@@ -21,6 +20,7 @@ use tokio::task::JoinSet;
 
 use crate::{
     discovery::{Discovery, DiscoveryItem},
+    util::time::Duration,
     util::AbortingJoinHandle,
     AddrInfo, Endpoint, NodeId,
 };

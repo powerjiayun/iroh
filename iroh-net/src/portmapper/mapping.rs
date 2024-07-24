@@ -1,10 +1,12 @@
 //! A port mapping created with one of the supported protocols.
 
-use std::{net::Ipv4Addr, num::NonZeroU16, time::Duration};
+use std::{net::Ipv4Addr, num::NonZeroU16};
 
 use anyhow::Result;
 
 use super::{nat_pmp, pcp, upnp};
+
+use crate::util::time::Duration;
 
 pub(super) trait PortMapped: std::fmt::Debug + Unpin {
     fn external(&self) -> (Ipv4Addr, NonZeroU16);

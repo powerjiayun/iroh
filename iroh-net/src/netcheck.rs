@@ -10,7 +10,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Debug};
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context as _, Result};
 use bytes::Bytes;
@@ -26,6 +25,7 @@ use crate::net::ip::to_canonical;
 #[cfg(feature = "native")]
 use crate::net::{IpFamily, UdpSocket};
 use crate::relay::RelayUrl;
+use crate::util::time::{Duration, Instant};
 use crate::util::{task, CancelOnDrop};
 
 #[cfg(feature = "native")]

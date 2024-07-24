@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use anyhow::{bail, ensure, Context};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures_lite::{Stream, StreamExt};
@@ -9,6 +7,7 @@ use iroh_base::key::{Signature, PUBLIC_KEY_LENGTH};
 use tokio_util::codec::{Decoder, Encoder};
 
 use super::types::ClientInfo;
+use crate::util::time::Duration;
 use crate::{
     key::{PublicKey, SecretKey},
     util::time,

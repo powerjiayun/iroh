@@ -2,7 +2,6 @@ use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet, HashMap},
     hash::Hash,
     net::{IpAddr, SocketAddr},
-    time::{Duration, Instant},
 };
 
 use iroh_metrics::inc;
@@ -22,6 +21,7 @@ use crate::{
     stun,
     util::{
         relay_only_mode,
+        time::{Duration, Instant},
         watchable::{Watchable, Watcher},
     },
     NodeAddr, NodeId,

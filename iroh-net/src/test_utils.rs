@@ -73,11 +73,12 @@ pub async fn run_relay_server() -> Result<(RelayMap, RelayUrl, crate::relay::iro
 pub(crate) mod dns_and_pkarr_servers {
     use anyhow::Result;
     use iroh_base::key::{NodeId, SecretKey};
-    use std::{net::SocketAddr, time::Duration};
+    use std::net::SocketAddr;
     use url::Url;
 
     use super::{create_dns_resolver, CleanupDropGuard};
 
+    use crate::util::time::Duration;
     use crate::{
         discovery::{dns::DnsDiscovery, pkarr::PkarrPublisher, ConcurrentDiscovery},
         dns::DnsResolver,
@@ -338,11 +339,11 @@ pub(crate) mod pkarr_dns_state {
         future::Future,
         ops::Deref,
         sync::Arc,
-        time::Duration,
     };
 
     use crate::node_info::{node_id_from_hickory_name, NodeInfo};
     use crate::test_utils::dns_server::QueryHandler;
+    use crate::util::time::Duration;
     use crate::NodeId;
 
     #[derive(Debug, Clone)]

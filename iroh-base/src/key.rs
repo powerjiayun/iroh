@@ -49,8 +49,10 @@ const KEY_CACHE_TTL: Duration = Duration::from_secs(60);
 ///
 /// So that is about 4MB of max memory for the cache.
 const KEY_CACHE_CAPACITY: usize = 1024 * 16;
+#[cfg(not(target_arch = "wasm32"))]
 static KEY_CACHE: OnceCell<Mutex<TtlCache<[u8; 32], CryptoKeys>>> = OnceCell::new();
 
+#[cfg(not(target_arch = "wasm32"))]
 fn lock_key_cache() -> std::sync::MutexGuard<'static, TtlCache<[u8; 32], CryptoKeys>> {
     let mutex = KEY_CACHE.get_or_init(|| Mutex::new(TtlCache::new(KEY_CACHE_CAPACITY)));
     mutex.lock().expect("not poisoned")
@@ -59,6 +61,7 @@ fn lock_key_cache() -> std::sync::MutexGuard<'static, TtlCache<[u8; 32], CryptoK
 /// Get or create the crypto keys, and project something out of them.
 ///
 /// If the key has been verified before, this will not fail.
+#[cfg(not(target_arch = "wasm32"))]
 fn get_or_create_crypto_keys<T>(
     key: &[u8; 32],
     f: impl Fn(&CryptoKeys) -> T,
@@ -77,6 +80,16 @@ fn get_or_create_crypto_keys<T>(
             f(item)
         }
     })
+}
+#[cfg(target_arch = "wasm32")]
+fn get_or_create_crypto_keys<T>(
+    key: &[u8; 32],
+    f: impl Fn(&CryptoKeys) -> T,
+) -> std::result::Result<T, SignatureError> {
+    // cache miss, create. This might fail if the key is invalid.
+    let vk = VerifyingKey::from_bytes(key)?;
+    let item = CryptoKeys::new(vk);
+    Ok(f(&item))
 }
 
 /// A public key.
@@ -225,10 +238,13 @@ impl From<VerifyingKey> for PublicKey {
     fn from(verifying_key: VerifyingKey) -> Self {
         let item = CryptoKeys::new(verifying_key);
         let key = *verifying_key.as_bytes();
-        let mut table = lock_key_cache();
-        // we already have performed the crypto operation, so no need for
-        // get_or_create_crypto_keys. Just insert in any case.
-        table.insert(key, item, KEY_CACHE_TTL);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut table = lock_key_cache();
+            // we already have performed the crypto operation, so no need for
+            // get_or_create_crypto_keys. Just insert in any case.
+            table.insert(key, item, KEY_CACHE_TTL);
+        }
         PublicKey(key)
     }
 }

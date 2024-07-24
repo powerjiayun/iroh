@@ -171,6 +171,7 @@ wasm = [
     "dep:web-time",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
+    "backoff/wasm-bindgen",
     "ring/wasm32_unknown_unknown_js",
     "quinn/wasm",
     "quinn/runtime-wasm",

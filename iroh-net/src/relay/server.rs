@@ -3,7 +3,6 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
 
 use anyhow::{bail, Context as _, Result};
 use futures_lite::Stream;
@@ -21,6 +20,7 @@ use tracing::{info_span, trace, Instrument};
 use tungstenite::protocol::Role;
 
 use crate::key::{PublicKey, SecretKey};
+use crate::util::time::Duration;
 
 use super::codec::Frame;
 use super::http::Protocol;

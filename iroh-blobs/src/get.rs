@@ -14,7 +14,6 @@
 //! [iroh-net]: https://docs.rs/iroh-net
 use std::error::Error;
 use std::fmt::{self, Debug};
-use std::time::{Duration, Instant};
 
 use crate::Hash;
 use anyhow::Result;
@@ -26,6 +25,7 @@ use tracing::{debug, error};
 
 use crate::protocol::RangeSpecSeq;
 use crate::util::io::{TrackingReader, TrackingWriter};
+use crate::util::time::{Duration, Instant};
 use crate::IROH_BLOCK_SIZE;
 
 pub mod db;

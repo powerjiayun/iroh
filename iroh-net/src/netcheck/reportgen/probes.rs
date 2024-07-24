@@ -7,7 +7,6 @@
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{ensure, Result};
 
@@ -15,6 +14,7 @@ use anyhow::{ensure, Result};
 use crate::net::interfaces;
 use crate::netcheck::Report;
 use crate::relay::{RelayMap, RelayNode, RelayUrl};
+use crate::util::time::Duration;
 
 /// The retransmit interval used when netcheck first runs.
 ///

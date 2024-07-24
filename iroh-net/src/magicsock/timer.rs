@@ -1,8 +1,8 @@
 use std::future::Future;
-use std::time::Duration;
 
 use crate::util::task::{self, JoinHandle};
 use crate::util::time;
+use crate::util::time::Duration;
 
 /// A timer that works similar to golangs `Timer`.
 #[derive(Debug)]

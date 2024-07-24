@@ -67,7 +67,7 @@ impl PkarrPublisher {
         secret_key: SecretKey,
         pkarr_relay: Url,
         ttl: u32,
-        republish_interval: std::time::Duration,
+        republish_interval: crate::util::time::Duration,
     ) -> Self {
         debug!("creating pkarr publisher that publishes to {pkarr_relay}");
         let node_id = secret_key.public();

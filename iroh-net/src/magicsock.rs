@@ -26,7 +26,6 @@ use std::{
         Arc,
     },
     task::{ready, Context, Poll, Waker},
-    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context as _, Result};
@@ -54,7 +53,7 @@ use crate::{
     relay::{RelayMap, RelayUrl},
     stun,
     util::task::{self, JoinHandle, JoinSet},
-    util::time,
+    util::time::{self, Duration, Instant},
     util::watchable::{Watchable, Watcher},
     AddrInfo,
 };

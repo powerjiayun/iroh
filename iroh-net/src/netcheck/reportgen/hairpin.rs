@@ -13,7 +13,6 @@
 //! requests to it will fail which is intentional.
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use tokio::sync::oneshot;
@@ -22,6 +21,7 @@ use tracing::{debug, error, info_span, trace, warn, Instrument};
 use crate::net::UdpSocket;
 use crate::netcheck::{self, reportgen, Inflight};
 use crate::stun;
+use crate::util::time::{Duration, Instant};
 use crate::util::{task, time, CancelOnDrop};
 
 /// The amount of time we wait for a hairpinned packet to come back.

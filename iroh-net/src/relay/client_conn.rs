@@ -1,6 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -10,6 +9,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{trace, Instrument};
 
+use crate::util::time::Duration;
 use crate::util::AbortingJoinHandle;
 use crate::{disco::looks_like_disco_wrapper, key::PublicKey};
 

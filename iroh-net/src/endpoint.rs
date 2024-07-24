@@ -17,7 +17,6 @@ use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
-use std::time::Duration;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use derive_more::Debug;
@@ -28,6 +27,7 @@ use url::Url;
 
 #[cfg(feature = "native")]
 use crate::dns::{default_resolver, DnsResolver};
+use crate::util::time::Duration;
 use crate::{
     defaults,
     discovery::{Discovery, DiscoveryTask},

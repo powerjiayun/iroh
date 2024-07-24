@@ -1,7 +1,6 @@
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     num::NonZeroU16,
-    time::Duration,
 };
 
 use anyhow::{anyhow, Result};
@@ -11,6 +10,7 @@ use iroh_metrics::inc;
 use tracing::debug;
 
 use super::Metrics;
+use crate::util::time::Duration;
 
 pub type Gateway = aigd::Gateway<aigd::tokio::Tokio>;
 

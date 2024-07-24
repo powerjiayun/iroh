@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
 
 use anyhow::{anyhow, bail, ensure, Result};
 use bytes::Bytes;
@@ -28,6 +27,7 @@ use super::{
 };
 
 use crate::key::{PublicKey, SecretKey};
+use crate::util::time::Duration;
 use crate::util::{task, time, AbortingJoinHandle};
 
 const CLIENT_RECV_TIMEOUT: Duration = Duration::from_secs(120);

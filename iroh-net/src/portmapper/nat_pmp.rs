@@ -1,10 +1,11 @@
 //! Definitions and utilities to interact with a NAT-PMP server.
 
-use std::{net::Ipv4Addr, num::NonZeroU16, time::Duration};
+use std::{net::Ipv4Addr, num::NonZeroU16};
 
 use tracing::{debug, trace};
 
 use crate::net::UdpSocket;
+use crate::util::time::Duration;
 
 use self::protocol::{MapProtocol, Request, Response};
 
