@@ -46,7 +46,7 @@ use hickory_proto::error::ProtoError;
 use hickory_resolver::{Name, TokioAsyncResolver};
 use url::Url;
 
-use crate::{key::SecretKey, AddrInfo, NodeAddr, NodeId};
+use crate::{discovery::pkarr::handle_err, key::SecretKey, AddrInfo, NodeAddr, NodeId};
 
 /// The DNS name for the iroh TXT record.
 pub const IROH_TXT_NAME: &str = "_iroh";
@@ -374,7 +374,8 @@ impl<T: FromStr + Display + Hash + Ord> TxtAttrs<T> {
     ) -> Result<pkarr::SignedPacket> {
         let packet = self.to_pkarr_dns_packet(ttl)?;
         let keypair = pkarr::Keypair::from_secret_key(&secret_key.to_bytes());
-        let signed_packet = pkarr::SignedPacket::from_packet(&keypair, &packet)?;
+        let signed_packet =
+            pkarr::SignedPacket::from_packet(&keypair, &packet).map_err(handle_err)?;
         Ok(signed_packet)
     }
 

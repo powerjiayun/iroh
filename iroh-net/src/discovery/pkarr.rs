@@ -262,7 +262,7 @@ impl PkarrRelayClient {
 
     /// Resolve a [`SignedPacket`]
     pub async fn resolve(&self, node_id: NodeId) -> anyhow::Result<SignedPacket> {
-        let public_key = pkarr::PublicKey::try_from(node_id.as_bytes())?;
+        let public_key = pkarr::PublicKey::try_from(node_id.as_bytes()).map_err(handle_err)?;
         let mut url = self.pkarr_relay_url.clone();
         url.path_segments_mut()
             .map_err(|_| anyhow!("Failed to resolve: Invalid relay URL"))?
@@ -278,7 +278,7 @@ impl PkarrRelayClient {
         }
 
         let payload = response.bytes().await?;
-        Ok(SignedPacket::from_relay_payload(&public_key, &payload)?)
+        Ok(SignedPacket::from_relay_payload(&public_key, &payload).map_err(handle_err)?)
     }
 
     /// Publish a [`SignedPacket`]
@@ -304,4 +304,15 @@ impl PkarrRelayClient {
 
         Ok(())
     }
+}
+
+#[cfg(feature = "native")]
+pub(crate) fn handle_err(error: pkarr::Error) -> anyhow::Error {
+    error.into()
+}
+#[cfg(not(feature = "native"))]
+pub(crate) fn handle_err(error: pkarr::Error) -> anyhow::Error {
+    // In wasm32 pkarr has an error type that is !Send,
+    // so can't be turned into an anyhow::Error with its `From` impl.
+    anyhow::anyhow!("{error}")
 }

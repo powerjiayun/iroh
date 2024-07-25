@@ -47,7 +47,7 @@ num_enum = "0.7"
 once_cell = "1.18.0"
 parking_lot = "0.12.1"
 pin-project = "1"
-pkarr = { git = "https://github.com/matheus23/pkarr.git", version = "2.0.0", default-features = false, features = ["async"] }
+pkarr = { version = "2.0.0", default-features = false, features = ["async"] }
 postcard = { version = "1", default-features = false, features = ["alloc", "use-std", "experimental-derive"] }
 quinn = { git = "https://github.com/n0-computer/quinn.git", branch = "feat-wasm-2", package = "iroh-quinn", version = "0.10.5", default-features = false, features = ["ring", "rustls"] }
 quinn-proto = { git = "https://github.com/n0-computer/quinn.git", branch = "feat-wasm-2", package = "iroh-quinn-proto", version = "0.10.8", default-features = false, features = ["rustls"] }

@@ -2663,7 +2663,7 @@ dependencies = [
  "lru",
  "mainline",
  "parking_lot",
- "pkarr 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "pkarr 2.1.0",
  "rcgen 0.12.1",
  "redb 2.1.1",
  "regex",
@@ -2839,7 +2839,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "pin-project",
- "pkarr 2.1.0 (git+https://github.com/matheus23/pkarr.git)",
+ "pkarr 2.1.0",
  "postcard",
  "pretty_assertions",
  "proptest",
@@ -3851,29 +3851,6 @@ dependencies = [
  "lru",
  "mainline",
  "rand",
- "self_cell",
- "simple-dns",
- "thiserror",
- "tracing",
- "ureq",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "z32",
-]
-
-[[package]]
-name = "pkarr"
-version = "2.1.0"
-source = "git+https://github.com/matheus23/pkarr.git#e550f2e39d897f9abac1a9df85501e5b4c76ad1b"
-dependencies = [
- "bytes",
- "document-features",
- "ed25519-dalek",
- "flume",
- "futures",
- "js-sys",
- "lru",
  "self_cell",
  "simple-dns",
  "thiserror",
