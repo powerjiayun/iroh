@@ -57,7 +57,7 @@ rand_core = "0.6.4"
 rcgen = "0.12"
 reqwest = { version = "0.12.4", default-features = false, features = ["rustls-tls"] }
 ring = "0.17"
-rustls = { version = "0.21.11", default-features = false, features = ["dangerous_configuration"] }
+rustls = { git = "https://github.com/matheus23/rustls", branch = "0.21-wasm", default-features = false, features = ["dangerous_configuration"] }
 serde = { version = "1", features = ["derive", "rc"] }
 smallvec = "1.11.1"
 swarm-discovery = { version = "0.2.0", optional = true }
@@ -177,6 +177,7 @@ wasm = [
     "quinn/runtime-wasm",
     "quinn-proto/wasm",
     "iroh-base/wasm",
+    "time/wasm-bindgen",
 ]
 local_swarm_discovery = ["dep:swarm-discovery"]
 

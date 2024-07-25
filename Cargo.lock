@@ -2851,7 +2851,7 @@ dependencies = [
  "reqwest 0.12.5",
  "ring 0.17.8",
  "rtnetlink",
- "rustls 0.21.12",
+ "rustls 0.21.10",
  "rustls-pemfile 1.0.4",
  "rustls-webpki 0.101.7",
  "serde",
@@ -2927,7 +2927,7 @@ dependencies = [
 [[package]]
 name = "iroh-quinn"
 version = "0.10.5"
-source = "git+https://github.com/n0-computer/quinn.git?branch=feat-wasm-2#1a8b56ba3af25ba9584072b020a757b2310204d9"
+source = "git+https://github.com/n0-computer/quinn.git?branch=feat-wasm-2#57a5decc9cb24761305eb4ac3fc1fc8449b466a8"
 dependencies = [
  "bytes",
  "getrandom",
@@ -2936,7 +2936,7 @@ dependencies = [
  "pin-project-lite",
  "ring 0.17.8",
  "rustc-hash",
- "rustls 0.21.12",
+ "rustls 0.21.10",
  "rustls-pki-types",
  "thiserror",
  "tokio",
@@ -2966,14 +2966,14 @@ dependencies = [
 [[package]]
 name = "iroh-quinn-proto"
 version = "0.10.8"
-source = "git+https://github.com/n0-computer/quinn.git?branch=feat-wasm-2#1a8b56ba3af25ba9584072b020a757b2310204d9"
+source = "git+https://github.com/n0-computer/quinn.git?branch=feat-wasm-2#57a5decc9cb24761305eb4ac3fc1fc8449b466a8"
 dependencies = [
  "bytes",
  "getrandom",
  "rand",
  "ring 0.17.8",
  "rustc-hash",
- "rustls 0.21.12",
+ "rustls 0.21.10",
  "rustls-pki-types",
  "slab",
  "thiserror",
@@ -2998,7 +2998,7 @@ dependencies = [
 [[package]]
 name = "iroh-quinn-udp"
 version = "0.4.2"
-source = "git+https://github.com/n0-computer/quinn.git?branch=feat-wasm-2#1a8b56ba3af25ba9584072b020a757b2310204d9"
+source = "git+https://github.com/n0-computer/quinn.git?branch=feat-wasm-2#57a5decc9cb24761305eb4ac3fc1fc8449b466a8"
 dependencies = [
  "bytes",
  "libc",
@@ -4842,6 +4842,17 @@ dependencies = [
 
 [[package]]
 name = "rustls"
+version = "0.21.10"
+source = "git+https://github.com/matheus23/rustls?branch=0.21-wasm#968c2becc63e765d1e0ebfc1aca47370d0de7a21"
+dependencies = [
+ "ring 0.17.8",
+ "rustls-webpki 0.101.7",
+ "sct",
+ "web-time",
+]
+
+[[package]]
+name = "rustls"
 version = "0.21.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e"
@@ -5833,6 +5844,7 @@ checksum = "5dfd88e563464686c916c7e46e623e520ddc6d79fa6641390f2e3fa86e83e885"
 dependencies = [
  "deranged",
  "itoa",
+ "js-sys",
  "libc",
  "num-conv",
  "num_threads",

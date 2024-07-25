@@ -3,7 +3,6 @@ use std::{
     future::Future,
     net::{IpAddr, SocketAddr},
     sync::{atomic::Ordering, Arc},
-    time::{Duration, Instant},
 };
 
 use anyhow::Context;
@@ -20,7 +19,7 @@ use crate::{
     relay::{self, http::ClientError, ReceivedMessage, RelayUrl, MAX_PACKET_SIZE},
     util::{
         task::{self, JoinHandle, JoinSet},
-        time,
+        time::{self, Duration, Instant},
     },
 };
 

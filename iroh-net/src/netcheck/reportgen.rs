@@ -846,24 +846,25 @@ async fn run_probe(
         }
 
         Probe::Https { ref node, .. } => {
-            debug!("sending probe HTTPS");
-            match measure_https_latency(node).await {
-                Ok((latency, ip)) => {
-                    result.latency = Some(latency);
-                    // We set these IPv4 and IPv6 but they're not really used
-                    // and we don't necessarily set them both. If UDP is blocked
-                    // and both IPv4 and IPv6 are available over TCP, it's basically
-                    // random which fields end up getting set here.
-                    // Since they're not needed, that's fine for now.
-                    match ip {
-                        IpAddr::V4(_) => result.ipv4_can_send = true,
-                        IpAddr::V6(_) => result.ipv6_can_send = true,
-                    }
-                }
-                Err(err) => {
-                    warn!("https latency measurement failed: {:?}", err);
-                }
-            }
+            // ignore this for now, it's not implemented
+            // debug!("sending probe HTTPS");
+            // match measure_https_latency(node).await {
+            //     Ok((latency, ip)) => {
+            //         result.latency = Some(latency);
+            //         // We set these IPv4 and IPv6 but they're not really used
+            //         // and we don't necessarily set them both. If UDP is blocked
+            //         // and both IPv4 and IPv6 are available over TCP, it's basically
+            //         // random which fields end up getting set here.
+            //         // Since they're not needed, that's fine for now.
+            //         match ip {
+            //             IpAddr::V4(_) => result.ipv4_can_send = true,
+            //             IpAddr::V6(_) => result.ipv6_can_send = true,
+            //         }
+            //     }
+            //     Err(err) => {
+            //         warn!("https latency measurement failed: {:?}", err);
+            //     }
+            // }
         }
     }
 

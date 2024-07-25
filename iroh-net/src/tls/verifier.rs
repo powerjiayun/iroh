@@ -18,6 +18,7 @@ use rustls::{
 };
 
 use crate::key::PublicKey;
+use crate::util::time;
 
 use super::certificate;
 
@@ -86,7 +87,7 @@ impl ServerCertVerifier for Libp2pCertificateVerifier {
         _server_name: &rustls::ServerName,
         _scts: &mut dyn Iterator<Item = &[u8]>,
         _ocsp_response: &[u8],
-        _now: std::time::SystemTime,
+        _now: time::SystemTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
         let peer_id = verify_presented_certs(end_entity, intermediates)?;
 
@@ -148,7 +149,7 @@ impl ClientCertVerifier for Libp2pCertificateVerifier {
         &self,
         end_entity: &Certificate,
         intermediates: &[Certificate],
-        _now: std::time::SystemTime,
+        _now: time::SystemTime,
     ) -> Result<ClientCertVerified, rustls::Error> {
         verify_presented_certs(end_entity, intermediates)?;
 

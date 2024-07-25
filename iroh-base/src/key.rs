@@ -6,9 +6,9 @@ use std::{
     fmt::{Debug, Display},
     hash::Hash,
     str::FromStr,
-    sync::Mutex,
-    time::Duration,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use std::{sync::Mutex, time::Duration};
 
 use crate::base32::{self, HexOrBase32ParseError};
 pub use ed25519_dalek::{Signature, PUBLIC_KEY_LENGTH};
@@ -17,6 +17,7 @@ use once_cell::sync::OnceCell;
 use rand_core::CryptoRngCore;
 use serde::{Deserialize, Serialize};
 use ssh_key::LineEnding;
+#[cfg(not(target_arch = "wasm32"))]
 use ttl_cache::TtlCache;
 
 pub use self::encryption::SharedSecret;
@@ -43,11 +44,13 @@ impl CryptoKeys {
 /// Basically, if no crypto operations have been performed with a key for this
 /// duration, the crypto keys will be removed from the cache and need to be
 /// re-created when they are used again.
+#[cfg(not(target_arch = "wasm32"))]
 const KEY_CACHE_TTL: Duration = Duration::from_secs(60);
 /// Maximum number of keys in the crypto key cache. CryptoKeys are 224 bytes,
 /// keys are 32 bytes, so each entry is 256 bytes plus some overhead.
 ///
 /// So that is about 4MB of max memory for the cache.
+#[cfg(not(target_arch = "wasm32"))]
 const KEY_CACHE_CAPACITY: usize = 1024 * 16;
 #[cfg(not(target_arch = "wasm32"))]
 static KEY_CACHE: OnceCell<Mutex<TtlCache<[u8; 32], CryptoKeys>>> = OnceCell::new();
@@ -236,10 +239,10 @@ impl AsRef<[u8]> for PublicKey {
 
 impl From<VerifyingKey> for PublicKey {
     fn from(verifying_key: VerifyingKey) -> Self {
-        let item = CryptoKeys::new(verifying_key);
         let key = *verifying_key.as_bytes();
         #[cfg(not(target_arch = "wasm32"))]
         {
+            let item = CryptoKeys::new(verifying_key);
             let mut table = lock_key_cache();
             // we already have performed the crypto operation, so no need for
             // get_or_create_crypto_keys. Just insert in any case.

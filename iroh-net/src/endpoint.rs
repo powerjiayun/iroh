@@ -642,15 +642,11 @@ impl Endpoint {
     /// The returned [`NodeAddr`] will have the current [`RelayUrl`] and local IP endpoints
     /// as they would be returned by [`Endpoint::home_relay`] and
     /// [`Endpoint::direct_addresses`].
-    pub async fn node_addr(&self) -> Result<NodeAddr> {
-        let addrs = self
-            .direct_addresses()
-            .next()
-            .await
-            .ok_or(anyhow!("No IP endpoints found"))?;
+    pub fn node_addr(&self) -> NodeAddr {
+        let addrs = self.direct_addresses().current();
         let relay = self.home_relay();
         let addrs = addrs.into_iter().map(|x| x.addr).collect();
-        Ok(NodeAddr::from_parts(self.node_id(), relay, addrs))
+        NodeAddr::from_parts(self.node_id(), relay, addrs)
     }
 
     /// Returns the [`RelayUrl`] of the Relay server used as home relay.

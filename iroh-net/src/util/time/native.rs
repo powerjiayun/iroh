@@ -1,3 +1,4 @@
+pub use std::time::SystemTime;
 pub use tokio::time::{sleep, timeout, Duration, Instant};
 pub use tokio_stream::wrappers::IntervalStream as Interval;
 

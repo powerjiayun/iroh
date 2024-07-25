@@ -1,11 +1,12 @@
 use core::future::Future;
+use futures_lite::stream::Stream;
 use std::{
     pin::Pin,
     task::{Context, Poll},
 };
 
-pub use gloo_timers::future::IntervalStream as Interval;
-pub use web_time::{Duration, Instant};
+pub use gloo_timers::future::IntervalStream;
+pub use web_time::{Duration, Instant, SystemTime};
 
 /// Errors returned by `Timeout`.
 ///
@@ -37,13 +38,44 @@ where
 }
 
 /// TODO(matheus23): DOCS
+#[derive(Debug)]
+#[must_use = "streams do nothing unless polled or spawned"]
+#[pin_project::pin_project]
+pub enum Interval {
+    /// TODO(matheus23): DOCS
+    InOffset(#[pin] gloo_timers::future::TimeoutFuture, u32),
+    /// TODO(matheus23): DOCS
+    InStream(#[pin] IntervalStream),
+}
+
+impl Stream for Interval {
+    type Item = ();
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        match *self {
+            Interval::InOffset(ref mut offset, interval) => match Pin::new(offset).poll(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(()) => {
+                    *self.as_mut() = Interval::InStream(IntervalStream::new(interval));
+                    Poll::Pending
+                }
+            },
+            Interval::InStream(ref mut stream) => Pin::new(stream).poll_next(cx),
+        }
+    }
+}
+
+/// TODO(matheus23): DOCS
 pub fn interval(dur: Duration) -> Interval {
-    Interval::new(u32::try_from(dur.as_millis()).expect("interval too large"))
+    let interval = u32::try_from(dur.as_millis()).expect("interval too large");
+    Interval::InStream(IntervalStream::new(interval))
 }
 
 /// TODO(matheus23): DOCS
 pub fn interval_at(start: Instant, dur: Duration) -> Interval {
-    todo!()
+    let interval = u32::try_from(dur.as_millis()).expect("interval too large");
+    let offset = start.duration_since(Instant::now());
+    Interval::InOffset(gloo_timers::future::sleep(offset), interval)
 }
 
 /// TODO(matheus23): DOCS

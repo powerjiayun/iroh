@@ -1599,6 +1599,13 @@ pub struct DirectAddrsStream {
     inner: Watcher<DiscoveredEndpoints>,
 }
 
+impl DirectAddrsStream {
+    /// Returns a copy of the current state of discovered direct addresses.
+    pub fn current(&self) -> Vec<DirectAddr> {
+        self.inner.get().iter().cloned().collect()
+    }
+}
+
 impl Stream for DirectAddrsStream {
     type Item = Vec<DirectAddr>;
 
@@ -1743,7 +1750,8 @@ impl AsyncUdpSocket for Handle {
 
     #[cfg(not(feature = "native"))]
     fn local_addr(&self) -> io::Result<SocketAddr> {
-        todo!() // TODO(matheus23): What do we do with binding ports in browsers?
+        Ok(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
+        // todo!() // TODO(matheus23): What do we do with binding ports in browsers?
     }
 }
 
@@ -1752,7 +1760,6 @@ enum ActorMessage {
     Shutdown,
     ReceiveRelay(RelayReadResult),
     EndpointPingExpired(usize, stun::TransactionId),
-    #[cfg(feature = "native")]
     NetcheckReport(Result<Option<Arc<netcheck::Report>>>, &'static str),
     #[cfg(feature = "native")]
     NetworkChange,
@@ -1851,8 +1858,6 @@ impl Actor {
                     let reason = *endpoints_update_receiver.borrow();
                     trace!("tick: endpoints update receiver {:?}", reason);
                     if let Some(reason) = reason {
-                        // TODO(matheus23): Find a better way
-                        #[cfg(feature = "native")]
                         self.update_endpoints(reason).await;
                     }
                 }
@@ -1888,8 +1893,6 @@ impl Actor {
                     let reason = *endpoints_update_receiver.borrow();
                     trace!("tick: endpoints update receiver {:?}", reason);
                     if let Some(reason) = reason {
-                        // TODO(matheus23): Find a better way
-                        #[cfg(feature = "native")]
                         self.update_endpoints(reason).await;
                     }
                 }
@@ -1972,7 +1975,6 @@ impl Actor {
             ActorMessage::EndpointPingExpired(id, txid) => {
                 self.msock.node_map.notify_ping_timeout(id, txid);
             }
-            #[cfg(feature = "native")]
             ActorMessage::NetcheckReport(report, why) => {
                 match report {
                     Ok(report) => {
@@ -2073,12 +2075,12 @@ impl Actor {
     /// Note that invoking this is managed by the [`EndpointUpdateState`] and this should
     /// never be invoked directly.  Some day this will be refactored to not allow this easy
     /// mistake to be made.
-    #[cfg(feature = "native")]
     #[instrument(level = "debug", skip_all)]
     async fn update_endpoints(&mut self, why: &'static str) {
         inc!(MagicsockMetrics, update_endpoints);
 
         debug!("starting endpoint update ({})", why);
+        #[cfg(feature = "native")]
         self.port_mapper.procure_mapping();
         self.update_net_info(why).await;
     }
@@ -2292,7 +2294,6 @@ impl Actor {
     /// Note that invoking this is managed by [`EndpointUpdateState`] via `update_endpoints`
     /// and this should never be invoked directly.  Some day this will be refactored to not
     /// allow this easy mistake to be made.
-    #[cfg(feature = "native")]
     #[instrument(level = "debug", skip_all)]
     async fn update_net_info(&mut self, why: &'static str) {
         if self.msock.relay_map.is_empty() {
@@ -2305,18 +2306,26 @@ impl Actor {
         }
 
         let relay_map = self.msock.relay_map.clone();
+        #[cfg(feature = "native")]
         let pconn4 = Some(self.pconn4.as_socket());
+        #[cfg(feature = "native")]
         let pconn6 = self.pconn6.as_ref().map(|p| p.as_socket());
 
         debug!("requesting netcheck report");
         match self
             .net_checker
-            .get_report_channel(relay_map, pconn4, pconn6)
+            .get_report_channel(
+                relay_map,
+                #[cfg(feature = "native")]
+                pconn4,
+                #[cfg(feature = "native")]
+                pconn6,
+            )
             .await
         {
             Ok(rx) => {
                 let msg_sender = self.msg_sender.clone();
-                tokio::task::spawn(async move {
+                task::spawn(async move {
                     let report = time::timeout(NETCHECK_REPORT_TIMEOUT, rx).await;
                     let report: anyhow::Result<_> = match report {
                         Ok(Ok(Ok(report))) => Ok(Some(report)),
@@ -2339,7 +2348,6 @@ impl Actor {
         }
     }
 
-    #[cfg(feature = "native")]
     async fn handle_netcheck_report(&mut self, report: Option<Arc<netcheck::Report>>) {
         if let Some(ref report) = report {
             self.msock
@@ -2353,11 +2361,16 @@ impl Actor {
             );
             self.no_v4_send = !r.ipv4_can_send;
 
+            #[cfg(feature = "native")]
             let have_port_map = self.port_mapper.watch_external_address().borrow().is_some();
+            #[cfg(not(feature = "native"))]
+            let have_port_map = false;
+
             let mut ni = NetInfo {
                 relay_latency: Default::default(),
                 mapping_varies_by_dest_ip: r.mapping_varies_by_dest_ip,
                 hair_pinning: r.hair_pinning,
+                #[cfg(feature = "native")]
                 portmap_probe: r.portmap_probe.clone(),
                 have_port_map,
                 working_ipv6: Some(r.ipv6),

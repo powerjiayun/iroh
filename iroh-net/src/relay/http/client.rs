@@ -253,7 +253,10 @@ impl ClientBuilder {
             is_prober: false,
             server_public_key: None,
             url: url.into(),
+            #[cfg(feature = "native")]
             protocol: Protocol::Relay,
+            #[cfg(not(feature = "native"))]
+            protocol: Protocol::Websocket,
             #[cfg(any(test, feature = "test-utils"))]
             insecure_skip_cert_verify: false,
             proxy_url: None,
