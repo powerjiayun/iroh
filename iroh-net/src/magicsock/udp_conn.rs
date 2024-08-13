@@ -112,43 +112,18 @@ impl AsyncUdpSocket for UdpConn {
 }
 
 fn bind(port: u16, network: IpFamily) -> anyhow::Result<UdpSocket> {
-    debug!(?network, %port, "binding");
+    warn!(?network, %port, "binding");
 
-    // Build a list of preferred ports.
-    // - Best is the port that the user requested.
-    // - Second best is the port that is currently in use.
-    // - If those fail, fall back to 0.
-
-    let mut ports = Vec::new();
-    if port != 0 {
-        ports.push(port);
-    }
-    // Backup port
-    ports.push(0);
-    // Remove duplicates. (All duplicates are consecutive.)
-    ports.dedup();
-    debug!(?ports, "candidate ports");
-
-    for port in &ports {
-        match UdpSocket::bind(network, *port) {
-            Ok(pconn) => {
-                let local_addr = pconn.local_addr().context("UDP socket not bound")?;
-                debug!(?network, %local_addr, "successfully bound");
-                return Ok(pconn);
-            }
-            Err(err) => {
-                warn!(?network, %port, "failed to bind: {:#?}", err);
-                continue;
-            }
+    match UdpSocket::bind(network, port) {
+        Ok(pconn) => {
+            let local_addr = pconn.local_addr().context("UDP socket not bound")?;
+            debug!(?network, %local_addr, "successfully bound");
+            return Ok(pconn);
+        }
+        Err(err) => {
+            bail!("failed to bind {network:?} (port {port}): {:#?}", err);
         }
     }
-
-    // Failed to bind, including on port 0 (!).
-    bail!(
-        "failed to bind any ports on {:?} (tried {:?})",
-        network,
-        ports
-    );
 }
 
 /// Poller for when the socket is writable.

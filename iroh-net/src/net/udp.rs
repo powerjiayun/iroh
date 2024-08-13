@@ -55,7 +55,7 @@ impl UdpSocket {
         let addr = addr.into();
         let network = IpFamily::from(addr.ip());
         let socket = socket2::Socket::new(
-            network.into(),
+            socket2::Domain::from(network),
             socket2::Type::DGRAM,
             Some(socket2::Protocol::UDP),
         )
