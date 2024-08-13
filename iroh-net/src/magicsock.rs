@@ -675,8 +675,13 @@ impl MagicSock {
 
     fn try_send_udp(&self, addr: SocketAddr, transmit: &quinn_udp::Transmit) -> io::Result<()> {
         let conn = self.conn_for_addr(addr)?;
-        tracing::trace!(is_ipv6 = addr.is_ipv6(), "try_send_udp on");
-        conn.try_send(transmit)?;
+        let result = conn.try_send(transmit);
+        if let Err(e) = &result {
+            if e.kind() == io::ErrorKind::WouldBlock {
+                tracing::warn!(is_ipv6 = addr.is_ipv6(), "try_send_udp would block");
+            }
+        }
+        result?;
         let total_bytes: u64 = transmit.contents.len() as u64;
         if addr.is_ipv6() {
             inc_by!(MagicsockMetrics, send_ipv6, total_bytes);
@@ -1777,13 +1782,13 @@ impl quinn::UdpPoller for IoPoller {
     fn poll_writable(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
         // This version returns Ready as soon as any of them are ready.
         let this = &mut *self;
-        tracing::trace!("Polling ipv4 for writability");
+        tracing::warn!("Polling ipv4 for writability");
         match this.ipv4_poller.as_mut().poll_writable(cx) {
             Poll::Ready(_) => return Poll::Ready(Ok(())),
             Poll::Pending => (),
         }
         if let Some(ref mut ipv6_poller) = this.ipv6_poller {
-            tracing::trace!("Polling ipv6 for writability");
+            tracing::warn!("Polling ipv6 for writability");
             match ipv6_poller.as_mut().poll_writable(cx) {
                 Poll::Ready(_) => return Poll::Ready(Ok(())),
                 Poll::Pending => (),
@@ -1791,7 +1796,7 @@ impl quinn::UdpPoller for IoPoller {
         }
         match this.relay_sender.capacity() {
             0 => {
-                tracing::trace!("Relay sending is out of capacity");
+                tracing::warn!("Relay sending is out of capacity");
                 self.relay_send_waker.lock().replace(cx.waker().clone());
                 Poll::Pending
             }
