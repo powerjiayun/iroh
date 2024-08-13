@@ -675,6 +675,7 @@ impl MagicSock {
 
     fn try_send_udp(&self, addr: SocketAddr, transmit: &quinn_udp::Transmit) -> io::Result<()> {
         let conn = self.conn_for_addr(addr)?;
+        tracing::trace!(is_ipv6 = addr.is_ipv6(), "try_send_udp on");
         conn.try_send(transmit)?;
         let total_bytes: u64 = transmit.contents.len() as u64;
         if addr.is_ipv6() {
