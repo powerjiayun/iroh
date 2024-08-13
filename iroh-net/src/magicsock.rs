@@ -1780,20 +1780,24 @@ struct IoPoller {
 
 impl quinn::UdpPoller for IoPoller {
     fn poll_writable(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        // This version returns Ready as soon as any of them are ready.
+        // This version returns Ready as soon as all of them are ready
         let this = &mut *self;
         tracing::warn!("Polling ipv4 for writability");
-        match this.ipv4_poller.as_mut().poll_writable(cx) {
-            Poll::Ready(_) => return Poll::Ready(Ok(())),
-            Poll::Pending => (),
+        let ipv4_ready = this.ipv4_poller.as_mut().poll_writable(cx);
+        tracing::warn!("Polling ipv6 for writability");
+        let ipv6_ready = this
+            .ipv6_poller
+            .as_mut()
+            .map(|p| p.as_mut().poll_writable(cx));
+        tracing::warn!(?ipv4_ready, ?ipv6_ready, "Poll status");
+
+        if let Poll::Pending = ipv4_ready {
+            return Poll::Pending;
         }
-        if let Some(ref mut ipv6_poller) = this.ipv6_poller {
-            tracing::warn!("Polling ipv6 for writability");
-            match ipv6_poller.as_mut().poll_writable(cx) {
-                Poll::Ready(_) => return Poll::Ready(Ok(())),
-                Poll::Pending => (),
-            }
+        if let Some(Poll::Pending) = ipv6_ready {
+            return Poll::Pending;
         }
+
         match this.relay_sender.capacity() {
             0 => {
                 tracing::warn!("Relay sending is out of capacity");
