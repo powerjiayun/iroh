@@ -521,6 +521,25 @@ impl MagicSock {
                 if let Some(addr) = udp_addr {
                     // rewrite target address
                     transmit.destination = addr;
+                    if let Some(ref mut src_ip) = transmit.src_ip {
+                        let (local_ipv4, local_ipv6) = self
+                            .local_addrs
+                            .read()
+                            .expect("local_addrs lock poisoned")
+                            .clone();
+                        match addr {
+                            SocketAddr::V4(_) => {
+                                *src_ip = local_ipv4.ip();
+                            }
+                            SocketAddr::V6(_) => {
+                                if let Some(local_ipv6) = local_ipv6 {
+                                    *src_ip = local_ipv6.ip();
+                                } else {
+                                    panic!("Uhm, cannot send on IPV6 without ipv6 socket bound");
+                                }
+                            }
+                        }
+                    }
                     match self.try_send_udp(addr, &transmit) {
                         Ok(()) => {
                             trace!(node = %node_id.fmt_short(), dst = %addr,
