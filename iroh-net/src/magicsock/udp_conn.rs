@@ -29,7 +29,8 @@ impl UdpConn {
         self.io.clone()
     }
 
-    pub(super) fn bind(port: u16, network: IpFamily) -> anyhow::Result<Self> {
+    /// ...
+    pub fn bind(port: u16, network: IpFamily) -> anyhow::Result<Self> {
         let sock = bind(port, network)?;
         let state = quinn_udp::UdpSocketState::new(quinn_udp::UdpSockRef::from(&sock))?;
         Ok(Self {
@@ -38,10 +39,12 @@ impl UdpConn {
         })
     }
 
+    /// ...
     pub fn port(&self) -> u16 {
         self.local_addr().map(|p| p.port()).unwrap_or_default()
     }
 
+    /// ...
     #[allow(clippy::unused_async)]
     pub async fn close(&self) -> Result<(), io::Error> {
         // Nothing to do atm

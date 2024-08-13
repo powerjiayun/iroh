@@ -73,7 +73,8 @@ mod metrics;
 mod node_map;
 mod relay_actor;
 mod timer;
-mod udp_conn;
+/// IDGAF
+pub mod udp_conn;
 
 pub use self::metrics::Metrics;
 pub use self::node_map::{

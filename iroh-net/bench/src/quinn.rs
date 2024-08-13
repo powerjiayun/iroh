@@ -76,13 +76,11 @@ pub async fn connect_client(
 
     // let mut config = quinn::ClientConfig::new(Arc::new(crypto));
     config.transport_config(Arc::new(transport));
-
-    let addr = SocketAddr::new("127.0.0.1".parse().unwrap(), 0);
-
-    let socket = bind_socket(addr).unwrap();
-
+    let runtime: Arc<dyn quinn::Runtime> = Arc::new(TokioRuntime);
+    let socket = iroh_net::magicsock::udp_conn::UdpConn::bind(0, iroh_net::net::IpFamily::V4)?;
     let ep =
-        quinn::Endpoint::new(Default::default(), None, socket, Arc::new(TokioRuntime)).unwrap();
+        Endpoint::new_with_abstract_socket(Default::default(), None, Arc::new(socket), runtime)?;
+
     let connection = ep
         .connect_with(config, server_addr, "local")?
         .await
