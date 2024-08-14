@@ -62,6 +62,7 @@ impl AsyncUdpSocket for UdpConn {
     }
 
     fn try_send(&self, transmit: &Transmit<'_>) -> io::Result<()> {
+        tracing::trace!(dst = %transmit.destination, ecn = ?transmit.ecn, len = transmit.contents.len(), segment_size = ?transmit.segment_size, src_ip = ?transmit.src_ip, "UDP recv");
         self.io.try_io(Interest::WRITABLE, || {
             let sock_ref = UdpSockRef::from(&self.io);
             self.inner.send(sock_ref, transmit)
