@@ -2946,7 +2946,7 @@ dependencies = [
 [[package]]
 name = "iroh-quinn"
 version = "0.11.3"
-source = "git+https://github.com/n0-computer/quinn?branch=iroh-0.11.x#a32092de403b798a911d27da5f00df6d21731aed"
+source = "git+https://github.com/n0-computer/quinn?branch=matheus23/diagnose-windows#7318f2fc23da7f7386abafac3817d4374319abb0"
 dependencies = [
  "bytes",
  "iroh-quinn-proto",
@@ -2963,7 +2963,7 @@ dependencies = [
 [[package]]
 name = "iroh-quinn-proto"
 version = "0.11.6"
-source = "git+https://github.com/n0-computer/quinn?branch=iroh-0.11.x#a32092de403b798a911d27da5f00df6d21731aed"
+source = "git+https://github.com/n0-computer/quinn?branch=matheus23/diagnose-windows#7318f2fc23da7f7386abafac3817d4374319abb0"
 dependencies = [
  "bytes",
  "rand",
@@ -2980,7 +2980,7 @@ dependencies = [
 [[package]]
 name = "iroh-quinn-udp"
 version = "0.5.4"
-source = "git+https://github.com/n0-computer/quinn?branch=iroh-0.11.x#a32092de403b798a911d27da5f00df6d21731aed"
+source = "git+https://github.com/n0-computer/quinn?branch=matheus23/diagnose-windows#7318f2fc23da7f7386abafac3817d4374319abb0"
 dependencies = [
  "libc",
  "once_cell",

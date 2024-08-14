@@ -118,7 +118,9 @@ impl ConnectionSelector {
 pub fn configure_tracing_subscriber() {
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::from_str("none,iroh_quinn=trace").unwrap(),
+            )
             .finish(),
     )
     .unwrap();

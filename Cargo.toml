@@ -35,7 +35,7 @@ unused-async = "warn"
 
 [patch.crates-io]
 tokio-rustls-acme = { git = "https://github.com/n0-computer/tokio-rustls-acme", branch = "rustls-23" }
-iroh-quinn = { git = "https://github.com/n0-computer/quinn", branch = "iroh-0.11.x" }
-iroh-quinn-udp = { git = "https://github.com/n0-computer/quinn", branch = "iroh-0.11.x" }
-iroh-quinn-proto = { git = "https://github.com/n0-computer/quinn", branch = "iroh-0.11.x" }
+iroh-quinn = { git = "https://github.com/n0-computer/quinn", branch = "matheus23/diagnose-windows" }
+iroh-quinn-udp = { git = "https://github.com/n0-computer/quinn", branch = "matheus23/diagnose-windows" }
+iroh-quinn-proto = { git = "https://github.com/n0-computer/quinn", branch = "matheus23/diagnose-windows" }
 quic-rpc = { git = "https://github.com/n0-computer/quic-rpc", branch = "flub/quinn11-rustls23" }
