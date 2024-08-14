@@ -29,11 +29,10 @@ pub fn server_endpoint(rt: &tokio::runtime::Runtime, opt: &Opt) -> (SocketAddr, 
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(crypto));
     server_config.transport_config(Arc::new(transport));
 
-    let socket =
-        iroh_net::magicsock::udp_conn::UdpConn::bind(0, iroh_net::net::IpFamily::V4).unwrap();
-
     let _guard = rt.enter();
     rt.block_on(async move {
+        let socket =
+            iroh_net::magicsock::udp_conn::UdpConn::bind(0, iroh_net::net::IpFamily::V4).unwrap();
         let ep = Endpoint::new_with_abstract_socket(
             Default::default(),
             None,
