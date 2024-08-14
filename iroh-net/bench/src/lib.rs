@@ -120,7 +120,7 @@ pub fn configure_tracing_subscriber() {
         tracing_subscriber::FmtSubscriber::builder()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::from_str(
-                    "none,iroh_net::magicsock::udp_conn=trace,iroh_quinn=trace",
+                    "none,iroh_net::magicsock=trace,iroh_quinn=trace",
                 )
                 .unwrap(),
             )
