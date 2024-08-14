@@ -2487,16 +2487,17 @@ fn new_re_stun_timer(initial_delay: bool) -> time::Interval {
 /// Initial connection setup.
 fn bind(port: u16) -> Result<(UdpConn, Option<UdpConn>)> {
     let pconn4 = UdpConn::bind(port, IpFamily::V4).context("bind IPv4 failed")?;
-    let ip4_port = pconn4.local_addr()?.port();
-    let ip6_port = ip4_port.checked_add(1).unwrap_or(ip4_port - 1);
+    // let ip4_port = pconn4.local_addr()?.port();
+    // let ip6_port = ip4_port.checked_add(1).unwrap_or(ip4_port - 1);
 
-    let pconn6 = match UdpConn::bind(ip6_port, IpFamily::V6) {
-        Ok(conn) => Some(conn),
-        Err(err) => {
-            info!("bind ignoring IPv6 bind failure: {:?}", err);
-            None
-        }
-    };
+    // let pconn6 = match UdpConn::bind(ip6_port, IpFamily::V6) {
+    //     Ok(conn) => Some(conn),
+    //     Err(err) => {
+    //         info!("bind ignoring IPv6 bind failure: {:?}", err);
+    //         None
+    //     }
+    // };
+    let pconn6 = None;
 
     Ok((pconn4, pconn6))
 }
