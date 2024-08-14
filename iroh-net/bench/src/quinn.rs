@@ -29,16 +29,14 @@ pub fn server_endpoint(rt: &tokio::runtime::Runtime, opt: &Opt) -> (SocketAddr, 
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(crypto));
     server_config.transport_config(Arc::new(transport));
 
-    let addr = SocketAddr::new("127.0.0.1".parse().unwrap(), 0);
-
-    let socket = bind_socket(addr).unwrap();
+    let socket = iroh_net::magicsock::udp_conn::UdpConn::bind(0, iroh_net::net::IpFamily::V4)?;
 
     let _guard = rt.enter();
     rt.block_on(async move {
-        let ep = quinn::Endpoint::new(
+        let ep = Endpoint::new_with_abstract_socket(
             Default::default(),
-            Some(server_config),
-            socket,
+            None,
+            Arc::new(socket),
             Arc::new(TokioRuntime),
         )
         .unwrap();
@@ -75,10 +73,13 @@ pub async fn connect_client(
     let transport = transport_config(opt.max_streams, opt.initial_mtu);
 
     config.transport_config(Arc::new(transport));
-    let runtime: Arc<dyn quinn::Runtime> = Arc::new(TokioRuntime);
     let socket = iroh_net::magicsock::udp_conn::UdpConn::bind(0, iroh_net::net::IpFamily::V4)?;
-    let ep =
-        Endpoint::new_with_abstract_socket(Default::default(), None, Arc::new(socket), runtime)?;
+    let ep = Endpoint::new_with_abstract_socket(
+        Default::default(),
+        None,
+        Arc::new(socket),
+        Arc::new(TokioRuntime),
+    )?;
 
     let connection = ep
         .connect_with(config, server_addr, "local")?
