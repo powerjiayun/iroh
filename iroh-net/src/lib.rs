@@ -123,7 +123,7 @@ mod disco;
 pub mod discovery;
 pub mod dns;
 pub mod endpoint;
-mod magicsock;
+pub mod magicsock;
 pub mod metrics;
 pub mod net;
 pub mod netcheck;
