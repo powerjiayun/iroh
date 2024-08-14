@@ -1982,7 +1982,7 @@ impl Actor {
 
         let quic_mapped_addr = self.msock.node_map.receive_relay(url, dm.src);
 
-        let dst_ip = Some(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        let dst_ip = Some(IpAddr::V6(Ipv6Addr::LOCALHOST));
 
         // the relay packet is made up of multiple udp packets, prefixed by a u16 be length prefix
         //
