@@ -74,7 +74,6 @@ pub async fn connect_client(
 
     let transport = transport_config(opt.max_streams, opt.initial_mtu);
 
-    // let mut config = quinn::ClientConfig::new(Arc::new(crypto));
     config.transport_config(Arc::new(transport));
     let runtime: Arc<dyn quinn::Runtime> = Arc::new(TokioRuntime);
     let socket = iroh_net::magicsock::udp_conn::UdpConn::bind(0, iroh_net::net::IpFamily::V4)?;
