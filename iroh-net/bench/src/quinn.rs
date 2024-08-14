@@ -35,7 +35,7 @@ pub fn server_endpoint(rt: &tokio::runtime::Runtime, opt: &Opt) -> (SocketAddr, 
             iroh_net::magicsock::udp_conn::UdpConn::bind(0, iroh_net::net::IpFamily::V4).unwrap();
         let ep = Endpoint::new_with_abstract_socket(
             Default::default(),
-            None,
+            Some(server_config),
             Arc::new(socket),
             Arc::new(TokioRuntime),
         )
