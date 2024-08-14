@@ -707,8 +707,6 @@ impl MagicSock {
             Poll::Ready(n) => (n, true),
         };
 
-        let dst_ip = self.normalized_local_addr().ok().map(|addr| addr.ip());
-
         let mut quic_packets_total = 0;
 
         for (meta, buf) in metas.iter_mut().zip(bufs.iter_mut()).take(msgs) {
@@ -779,8 +777,6 @@ impl MagicSock {
                 // quinn skip the buf completely.
                 meta.len = 0;
             }
-            // Normalize local_ip
-            meta.dst_ip = dst_ip;
         }
 
         if quic_packets_total > 0 {
@@ -1976,26 +1972,6 @@ impl Actor {
         false
     }
 
-    fn normalized_local_addr(&self) -> io::Result<SocketAddr> {
-        let (v4, v6) = self.local_addr();
-        if let Some(v6) = v6 {
-            return v6;
-        }
-        v4
-    }
-
-    fn local_addr(&self) -> (io::Result<SocketAddr>, Option<io::Result<SocketAddr>>) {
-        // TODO: think more about this
-        // needs to pretend ipv6 always as the fake addrs are ipv6
-        let mut ipv6_addr = None;
-        if let Some(ref conn) = self.pconn6 {
-            ipv6_addr = Some(conn.local_addr());
-        }
-        let ipv4_addr = self.pconn4.local_addr();
-
-        (ipv4_addr, ipv6_addr)
-    }
-
     fn process_relay_read_result(&mut self, dm: RelayReadResult) -> Vec<RelayRecvResult> {
         trace!("process_relay_read {} bytes", dm.buf.len());
         if dm.buf.is_empty() {
@@ -2010,8 +1986,6 @@ impl Actor {
         //
         // split the packet into these parts
         let parts = PacketSplitIter::new(dm.buf);
-        // Normalize local_ip
-        let dst_ip = self.normalized_local_addr().ok().map(|addr| addr.ip());
 
         let mut out = Vec::new();
         for part in parts {
@@ -2026,7 +2000,7 @@ impl Actor {
                         len: part.len(),
                         stride: part.len(),
                         addr: quic_mapped_addr.0,
-                        dst_ip,
+                        dst_ip: None,
                         ecn: None,
                     };
                     out.push(Ok((dm.src, meta, part)));
