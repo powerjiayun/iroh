@@ -75,12 +75,14 @@ pub async fn connect_client(
 
     config.transport_config(Arc::new(transport));
 
-    let addr = SocketAddr::new("127.0.0.1".parse().unwrap(), 0);
+    let socket = iroh_net::magicsock::udp_conn::UdpConn::bind(0, iroh_net::net::IpFamily::V4)?;
+    let ep = Endpoint::new_with_abstract_socket(
+        Default::default(),
+        None,
+        Arc::new(socket),
+        Arc::new(TokioRuntime),
+    )?;
 
-    let socket = bind_socket(addr).unwrap();
-
-    let ep =
-        quinn::Endpoint::new(Default::default(), None, socket, Arc::new(TokioRuntime)).unwrap();
     let connection = ep
         .connect_with(config, server_addr, "local")?
         .await
