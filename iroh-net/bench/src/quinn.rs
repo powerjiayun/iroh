@@ -41,6 +41,7 @@ pub fn server_endpoint(rt: &tokio::runtime::Runtime, opt: &Opt) -> (SocketAddr, 
         )
         .unwrap();
         let addr = ep.local_addr().unwrap();
+        let addr = SocketAddr::new("127.0.0.1".parse().unwrap(), addr.port());
         (addr, ep)
     })
 }
