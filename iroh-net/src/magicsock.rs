@@ -19,7 +19,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     fmt::Display,
     io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     pin::Pin,
     sync::{
         atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering},
@@ -1982,7 +1982,7 @@ impl Actor {
 
         let quic_mapped_addr = self.msock.node_map.receive_relay(url, dm.src);
 
-        let dst_ip = Some(IpAddr::V6(Ipv6Addr::LOCALHOST));
+        let dst_ip = None;
 
         // the relay packet is made up of multiple udp packets, prefixed by a u16 be length prefix
         //
