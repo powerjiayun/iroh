@@ -492,6 +492,9 @@ impl MagicSock {
             .get_send_addrs(dest, self.ipv6_reported.load(Ordering::Relaxed))
         {
             Some((node_id, udp_addr, relay_url, msgs)) => {
+                if node_id.fmt_short() == self.me {
+                    tracing::error!(node_id = %node_id.fmt_short(), me = %self.me, "uuuuuhm, get_send_addrs returned outselves?");
+                }
                 let mut pings_sent = false;
                 // If we have pings to send, we *have* to send them out first.
                 if !msgs.is_empty() {
@@ -529,6 +532,7 @@ impl MagicSock {
                                 dst = %addr,
                                 mapped = %dest,
                                 len = transmit.segment_size.unwrap_or(transmit.contents.len()),
+                                hash = hash(transmit.contents),
                                 "sent transmit over UDP"
                             );
                             udp_sent = true;
@@ -627,13 +631,24 @@ impl MagicSock {
         node: NodeId,
         contents: RelayContents,
     ) -> io::Result<()> {
-        trace!(
-            node = %node.fmt_short(),
-            relay_url = %url,
-            count = contents.len(),
-            len = contents.iter().map(|c| c.len()).sum::<usize>(),
-            "send relay",
-        );
+        if contents.len() != 1 {
+            trace!(
+                node = %node.fmt_short(),
+                relay_url = %url,
+                count = contents.len(),
+                len = contents.iter().map(|c| c.len()).sum::<usize>(),
+                "send relay",
+            );
+        } else {
+            let content = &contents[0];
+            trace!(
+                node = %node.fmt_short(),
+                relay_url = %url,
+                len = content.len(),
+                hash = hash(content),
+                "send relay",
+            );
+        }
         let msg = RelayActorMessage::Send {
             url: url.clone(),
             contents,
@@ -727,13 +742,15 @@ impl MagicSock {
 
         for (meta, buf) in metas.iter_mut().zip(bufs.iter_mut()).take(msgs) {
             let mut start = 0;
-            let mut is_quic = false;
             let mut quic_packets_count = 0;
 
             // find disco and stun packets and forward them to the actor
             loop {
                 let end = start + meta.stride;
                 if end > meta.len {
+                    if start < meta.len {
+                        tracing::error!(start, end, meta.stride, meta.len, "skipping packet data")
+                    }
                     break;
                 }
                 let packet = &buf[start..end];
@@ -763,18 +780,17 @@ impl MagicSock {
 
                 if packet_is_quic {
                     quic_packets_count += 1;
-                    is_quic = true;
                 } else {
                     // overwrite the first byte of the packets with zero.
                     // this makes quinn reliably and quickly ignore the packet as long as
                     // [`quinn::EndpointConfig::grease_quic_bit`] is set to `false`
                     // (which we always do in Endpoint::bind).
-                    buf[start] = 0u8;
+                    buf[start..end].fill(0);
                 }
                 start = end;
             }
 
-            if is_quic {
+            if quic_packets_count > 0 {
                 // remap addr
                 match self.node_map.receive_udp(meta.addr) {
                     None => {
@@ -786,9 +802,11 @@ impl MagicSock {
                         trace!(
                             src = ?meta.addr,
                             mapped = %quic_mapped_addr,
-                            node = %node_id.fmt_short(),
+                            from = %node_id.fmt_short(),
+                            to = %self.me,
                             count = %quic_packets_count,
                             len = meta.len,
+                            hash = hash(&buf[..meta.len]),
                             "UDP recv quic packets"
                         );
                         quic_packets_total += quic_packets_count;
@@ -808,6 +826,14 @@ impl MagicSock {
             inc_by!(MagicsockMetrics, recv_datagrams, quic_packets_total as _);
             trace!("UDP recv: {} packets", quic_packets_total);
         }
+
+        // for (meta, buf) in metas.iter().zip(bufs.iter()).take(msgs) {
+        //     let mut data: BytesMut = buf[0..meta.len].into();
+        //     while !data.is_empty() {
+        //         let buf = data.split_to(meta.stride.min(data.len()));
+        //         trace!(first = %format!("{:08b}", buf[0]), "simulated first grease byte");
+        //     }
+        // }
 
         Poll::Ready(Ok(msgs))
     }
@@ -839,7 +865,16 @@ impl MagicSock {
                 Ok(Err(err)) => return Poll::Ready(Err(err)),
                 Ok(Ok((node_id, meta, bytes))) => {
                     inc_by!(MagicsockMetrics, recv_data_relay, bytes.len() as _);
-                    trace!(src = %meta.addr, node = %node_id.fmt_short(), count = meta.len / meta.stride, len = meta.len, "recv quic packets from relay");
+                    trace!(
+                        src = %meta.addr,
+                        from = %node_id.fmt_short(),
+                        to = %self.me,
+                        count = meta.len / meta.stride,
+                        meta.len,
+                        len = bytes.len(),
+                        hash = hash(&bytes),
+                        "recv quic packets from relay"
+                    );
                     buf_out[..bytes.len()].copy_from_slice(&bytes);
                     *meta_out = meta;
                     num_msgs += 1;
@@ -2585,12 +2620,13 @@ impl DiscoveredDirectAddrs {
 fn split_packets(transmit: &quinn_udp::Transmit) -> RelayContents {
     let mut res = SmallVec::with_capacity(1);
     let contents = transmit.contents;
+    trace!(?transmit.segment_size, "split_packets");
     if let Some(segment_size) = transmit.segment_size {
         for chunk in contents.chunks(segment_size) {
-            res.push(Bytes::from(chunk.to_vec()));
+            res.push(Bytes::copy_from_slice(chunk));
         }
     } else {
-        res.push(Bytes::from(contents.to_vec()));
+        res.push(Bytes::copy_from_slice(contents));
     }
     res
 }
@@ -2831,6 +2867,13 @@ impl NetInfo {
             && self.portmap_probe == other.portmap_probe
             && self.preferred_relay == other.preferred_relay
     }
+}
+
+fn hash(bytes: &[u8]) -> u64 {
+    use std::hash::Hasher;
+    let mut h = std::hash::DefaultHasher::new();
+    h.write(bytes);
+    h.finish()
 }
 
 #[cfg(test)]

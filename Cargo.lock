@@ -2958,7 +2958,7 @@ dependencies = [
 [[package]]
 name = "iroh-quinn"
 version = "0.11.3"
-source = "git+https://github.com/n0-computer/quinn.git?branch=matheus23/better-logs#252abf1e0379bfce186f6b111acda807fdb156ce"
+source = "git+https://github.com/n0-computer/quinn.git?branch=matheus23/better-logs#c425f46f7dcbd8ed08bb0917b6c99d3715ead942"
 dependencies = [
  "bytes",
  "iroh-quinn-proto",
@@ -2975,7 +2975,7 @@ dependencies = [
 [[package]]
 name = "iroh-quinn-proto"
 version = "0.11.6"
-source = "git+https://github.com/n0-computer/quinn.git?branch=matheus23/better-logs#252abf1e0379bfce186f6b111acda807fdb156ce"
+source = "git+https://github.com/n0-computer/quinn.git?branch=matheus23/better-logs#c425f46f7dcbd8ed08bb0917b6c99d3715ead942"
 dependencies = [
  "bytes",
  "rand",
@@ -2992,7 +2992,7 @@ dependencies = [
 [[package]]
 name = "iroh-quinn-udp"
 version = "0.5.4"
-source = "git+https://github.com/n0-computer/quinn.git?branch=matheus23/better-logs#252abf1e0379bfce186f6b111acda807fdb156ce"
+source = "git+https://github.com/n0-computer/quinn.git?branch=matheus23/better-logs#c425f46f7dcbd8ed08bb0917b6c99d3715ead942"
 dependencies = [
  "libc",
  "once_cell",

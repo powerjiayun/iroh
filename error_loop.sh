@@ -7,7 +7,7 @@ cargo test -p iroh-gossip --no-run --release
 executable_path=$(cargo test -p iroh-gossip --no-run --release 2>&1 | grep "Executable" | tail -n 1 | sed -n 's/.*(\(.*\)).*/\1/p')
 echo "Extracted path: ./$executable_path"
 
-total_runs=200
+total_runs=1000
 failure_count=0
 
 for ((counter=1; counter<=total_runs; counter++)); do
@@ -20,6 +20,12 @@ for ((counter=1; counter<=total_runs; counter++)); do
     duration=$((end_time - start_time))
 
     echo ", ${duration} ms"
+
+    grep "uuuuuhm" logs-2.txt
+
+    # if [ $duration -gt 1000 ]; then
+    #     exit 1
+    # fi
 
     if [ $err_code -ne 0 ]; then
         failure_count=$((failure_count + 1))
