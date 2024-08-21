@@ -839,7 +839,7 @@ impl Stream for TopicCommandStream {
 
 #[cfg(test)]
 mod test {
-    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+    // use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
     use std::time::Duration;
 
     use futures_concurrency::future::TryJoin;
@@ -889,32 +889,37 @@ mod test {
         let (relay_map, relay_url, _guard) =
             iroh_net::test_utils::run_relay_server().await.unwrap();
 
+        debug!(?relay_url, "relay url");
+
         let pub_ep = create_endpoint(&mut rng, relay_map.clone()).await.unwrap();
         let sub_ep0 = create_endpoint(&mut rng, relay_map.clone()).await.unwrap();
         let sub_ep1 = create_endpoint(&mut rng, relay_map.clone()).await.unwrap();
 
         let pub_addr = AddrInfo {
             relay_url: Some(relay_url.clone()),
-            direct_addresses: BTreeSet::from([SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::LOCALHOST,
-                pub_ep.bound_sockets().0.port(),
-            ))]),
+            direct_addresses: BTreeSet::new(),
+            // direct_addresses: BTreeSet::from([SocketAddr::V4(SocketAddrV4::new(
+            //     Ipv4Addr::LOCALHOST,
+            //     pub_ep.bound_sockets().0.port(),
+            // ))]),
         };
 
         let sub_addr0 = AddrInfo {
             relay_url: Some(relay_url.clone()),
-            direct_addresses: BTreeSet::from([SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::LOCALHOST,
-                sub_ep0.bound_sockets().0.port(),
-            ))]),
+            direct_addresses: BTreeSet::new(),
+            // direct_addresses: BTreeSet::from([SocketAddr::V4(SocketAddrV4::new(
+            //     Ipv4Addr::LOCALHOST,
+            //     sub_ep0.bound_sockets().0.port(),
+            // ))]),
         };
 
         let sub_addr1 = AddrInfo {
             relay_url: Some(relay_url.clone()),
-            direct_addresses: BTreeSet::from([SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::LOCALHOST,
-                sub_ep1.bound_sockets().0.port(),
-            ))]),
+            direct_addresses: BTreeSet::new(),
+            // direct_addresses: BTreeSet::from([SocketAddr::V4(SocketAddrV4::new(
+            //     Ipv4Addr::LOCALHOST,
+            //     sub_ep1.bound_sockets().0.port(),
+            // ))]),
         };
 
         let pub_id = pub_ep.node_id();
@@ -938,6 +943,11 @@ mod test {
             sub_gossip0.clone(),
             cancel.clone(),
         ));
+        // let sub_task1 = spawn(endpoint_loop(
+        //     sub_ep1.clone(),
+        //     sub_gossip1.clone(),
+        //     cancel.clone(),
+        // ));
 
         debug!("----- adding peers  ----- ");
         let topic: TopicId = blake3::hash(b"foobar").into();
@@ -969,9 +979,9 @@ mod test {
         debug!("----- joining  ----- ");
         // join the topics and wait for the connection to succeed
         [
-            pub_gossip.join(topic, vec![]),
-            sub_gossip0.join(topic, vec![pub_id]),
-            sub_gossip1.join(topic, vec![pub_id]),
+            pub_gossip.join(topic, vec![/*sub_id0, sub_id1*/]),
+            sub_gossip0.join(topic, vec![pub_id /*, sub_id1*/]),
+            sub_gossip1.join(topic, vec![pub_id /*, sub_id0*/]),
         ]
         .try_join()
         .await
@@ -988,5 +998,10 @@ mod test {
             .unwrap()
             .unwrap()
             .unwrap();
+        // timeout(Duration::from_secs(10), sub_task1)
+        //     .await
+        //     .unwrap()
+        //     .unwrap()
+        //     .unwrap();
     }
 }

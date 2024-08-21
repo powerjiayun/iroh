@@ -120,7 +120,7 @@ impl Builder {
         let relay_map = self.relay_mode.relay_map();
         let secret_key = self.secret_key.unwrap_or_else(SecretKey::generate);
         let mut transport_config = self.transport_config.unwrap_or_default();
-        transport_config.enable_segmentation_offload(false);
+        transport_config.enable_segmentation_offload(false); // simplify the gossip_net_smoke flaky test
         let static_config = StaticConfig {
             transport_config: Arc::new(transport_config),
             keylog: self.keylog,
