@@ -1689,107 +1689,112 @@ mod tests {
     #[tokio::test]
     async fn test_quinn() -> TestResult {
         let _logging_guard = iroh_test::logging::setup();
-        let mut tasks = tokio::task::JoinSet::<TestResult>::new();
-        let runtime = Arc::new(quinn::TokioRuntime);
 
-        const ALPN: &[u8] = b"test/0";
-        let static_config = StaticConfig {
-            keylog: false,
-            secret_key: SecretKey::generate(),
-            transport_config: Arc::new(TransportConfig::default()),
-        };
-        let server_config = static_config.create_server_config(vec![ALPN.to_vec()])?;
-        let unspecified_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
+        for i in 0..20 {
+            let mut tasks = tokio::task::JoinSet::<TestResult>::new();
+            let runtime = Arc::new(quinn::TokioRuntime);
 
-        let socket = std::net::UdpSocket::bind(unspecified_addr)?;
-        let server_abstract_socket = runtime.wrap_udp_socket(socket)?;
-        let server_capturing_socket = Arc::new(CapturingUdpSocket {
-            captured: OnceLock::new(),
-            socket: server_abstract_socket,
-        });
-        let server = quinn::Endpoint::new_with_abstract_socket(
-            EndpointConfig::default(),
-            Some(server_config),
-            server_capturing_socket.clone() as Arc<dyn quinn::AsyncUdpSocket>,
-            runtime.clone(),
-        )?;
+            const ALPN: &[u8] = b"test/0";
+            let static_config = StaticConfig {
+                keylog: false,
+                secret_key: SecretKey::generate(),
+                transport_config: Arc::new(TransportConfig::default()),
+            };
+            let server_config = static_config.create_server_config(vec![ALPN.to_vec()])?;
+            let unspecified_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
 
-        tasks.spawn({
-            let server = server.clone();
-            async move {
-                while let Some(incoming) = server.accept().await {
-                    let conn = incoming.await?;
-                    // Aaaaand close it again
-                    conn.close(42u32.into(), b"all good, we done");
+            let socket = std::net::UdpSocket::bind(unspecified_addr)?;
+            let server_abstract_socket = runtime.wrap_udp_socket(socket)?;
+            let server_capturing_socket = Arc::new(CapturingUdpSocket {
+                captured: OnceLock::new(),
+                socket: server_abstract_socket,
+            });
+            let server = quinn::Endpoint::new_with_abstract_socket(
+                EndpointConfig::default(),
+                Some(server_config),
+                server_capturing_socket.clone() as Arc<dyn quinn::AsyncUdpSocket>,
+                runtime.clone(),
+            )?;
+
+            tasks.spawn({
+                let server = server.clone();
+                async move {
+                    while let Some(incoming) = server.accept().await {
+                        let conn = incoming.await?;
+                        // Aaaaand close it again
+                        conn.close(42u32.into(), b"all good, we done");
+                    }
+
+                    Ok(())
                 }
+            });
 
-                Ok(())
-            }
-        });
+            let client_config = StaticConfig {
+                keylog: false,
+                secret_key: SecretKey::generate(),
+                transport_config: Arc::new(TransportConfig::default()),
+            };
 
-        let client_config = StaticConfig {
-            keylog: false,
-            secret_key: SecretKey::generate(),
-            transport_config: Arc::new(TransportConfig::default()),
-        };
+            let socket = socket2::Socket::new(
+                socket2::Domain::for_address(unspecified_addr),
+                socket2::Type::DGRAM,
+                Some(socket2::Protocol::UDP),
+            )?;
+            socket.bind(&unspecified_addr.into())?;
+            let abstract_socket = runtime.wrap_udp_socket(socket.into())?;
+            let client = quinn::Endpoint::new_with_abstract_socket(
+                EndpointConfig::default(),
+                Some(client_config.create_server_config(vec![ALPN.to_vec()])?),
+                abstract_socket,
+                runtime.clone(),
+            )?;
 
-        let socket = socket2::Socket::new(
-            socket2::Domain::for_address(unspecified_addr),
-            socket2::Type::DGRAM,
-            Some(socket2::Protocol::UDP),
-        )?;
-        socket.bind(&unspecified_addr.into())?;
-        let abstract_socket = runtime.wrap_udp_socket(socket.into())?;
-        let client = quinn::Endpoint::new_with_abstract_socket(
-            EndpointConfig::default(),
-            Some(client_config.create_server_config(vec![ALPN.to_vec()])?),
-            abstract_socket,
-            runtime.clone(),
-        )?;
+            let connecting = client.connect_with(
+                client_config.create_client_config(ALPN, static_config.secret_key.public())?,
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), server.local_addr()?.port()),
+                "localhost",
+            )?;
 
-        let connecting = client.connect_with(
-            client_config.create_client_config(ALPN, static_config.secret_key.public())?,
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), server.local_addr()?.port()),
-            "localhost",
-        )?;
+            let connection = connecting.await?;
+            let code = connection.closed().await;
+            println!("{code:?}");
 
-        let connection = connecting.await?;
-        let code = connection.closed().await;
-        println!("{code:?}");
+            // The client also acts as a "server" sometimes:
+            tasks.spawn({
+                let client = client.clone();
+                async move {
+                    while let Some(incoming) = client.accept().await {
+                        let conn = incoming.await?;
+                        // Aaaaand close it again
+                        conn.close(42u32.into(), b"all good, we done");
+                    }
 
-        // The client also acts as a "server" sometimes:
-        tasks.spawn({
-            let client = client.clone();
-            async move {
-                while let Some(incoming) = client.accept().await {
-                    let conn = incoming.await?;
-                    // Aaaaand close it again
-                    conn.close(42u32.into(), b"all good, we done");
+                    Ok(())
                 }
+            });
 
-                Ok(())
+            let transmit = server_capturing_socket
+                .captured
+                .get()
+                .expect("nothing captured?");
+
+            tracing::info!("RESENDING CAPTURED");
+
+            server_capturing_socket
+                .socket
+                .try_send(&transmit.as_transmit())
+                .expect("unblocked");
+
+            tokio::time::sleep(Duration::from_millis(200)).await; // give the sockets some time to process
+
+            server.close(1u32.into(), b"shutdown");
+            client.close(1u32.into(), b"shutdown");
+
+            tracing::info!(i, "Finished iteration");
+
+            while let Some(result) = tasks.join_next().await {
+                result??;
             }
-        });
-
-        let transmit = server_capturing_socket
-            .captured
-            .get()
-            .expect("nothing captured?");
-
-        tracing::info!("RESENDING CAPTURED");
-
-        server_capturing_socket
-            .socket
-            .try_send(&transmit.as_transmit())
-            .expect("unblocked");
-
-        tokio::time::sleep(Duration::from_millis(200)).await; // give the sockets some time to process
-
-        server.close(1u32.into(), b"shutdown");
-        client.close(1u32.into(), b"shutdown");
-
-        while let Some(result) = tasks.join_next().await {
-            result??;
         }
 
         Ok(())
