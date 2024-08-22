@@ -295,6 +295,17 @@ impl StaticConfig {
         )?;
         Ok(server_config)
     }
+
+    fn create_client_config(&self, alpn: &[u8], node_id: PublicKey) -> Result<quinn::ClientConfig> {
+        let alpn_protocols = vec![alpn.to_vec()];
+        let quic_client_config =
+            tls::make_client_config(&self.secret_key, Some(node_id), alpn_protocols, self.keylog)?;
+        let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
+        let mut transport_config = quinn::TransportConfig::default();
+        transport_config.keep_alive_interval(Some(Duration::from_secs(1)));
+        client_config.transport_config(Arc::new(transport_config));
+        Ok(client_config)
+    }
 }
 
 /// Creates a [`quinn::ServerConfig`] with the given secret key and limits.
@@ -490,20 +501,7 @@ impl Endpoint {
         alpn: &[u8],
         addr: SocketAddr,
     ) -> Result<quinn::Connection> {
-        let client_config = {
-            let alpn_protocols = vec![alpn.to_vec()];
-            let quic_client_config = tls::make_client_config(
-                &self.static_config.secret_key,
-                Some(node_id),
-                alpn_protocols,
-                self.static_config.keylog,
-            )?;
-            let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
-            let mut transport_config = quinn::TransportConfig::default();
-            transport_config.keep_alive_interval(Some(Duration::from_secs(1)));
-            client_config.transport_config(Arc::new(transport_config));
-            client_config
-        };
+        let client_config = self.static_config.create_client_config(alpn, node_id)?;
 
         // TODO: We'd eventually want to replace "localhost" with something that makes more sense.
         let connect = self
@@ -1207,10 +1205,12 @@ fn is_cgi() -> bool {
 #[cfg(test)]
 mod tests {
 
-    use std::time::Instant;
+    use std::{net::Ipv4Addr, sync::OnceLock, time::Instant};
 
     use iroh_test::CallOnDrop;
+    use quinn::{EndpointConfig, Runtime};
     use rand_core::SeedableRng;
+    use testresult::TestResult;
     use tracing::{error_span, info, info_span, Instrument};
 
     use crate::test_utils::run_relay_server;
@@ -1684,5 +1684,196 @@ mod tests {
         let (r1, r2) = tokio::try_join!(res_ep1, res_ep2).unwrap();
         r1.expect("ep1 timeout").unwrap();
         r2.expect("ep2 timeout").unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_quinn() -> TestResult {
+        let _logging_guard = iroh_test::logging::setup();
+        let mut tasks = tokio::task::JoinSet::<TestResult>::new();
+        let runtime = Arc::new(quinn::TokioRuntime);
+
+        const ALPN: &[u8] = b"test/0";
+        let static_config = StaticConfig {
+            keylog: false,
+            secret_key: SecretKey::generate(),
+            transport_config: Arc::new(TransportConfig::default()),
+        };
+        let server_config = static_config.create_server_config(vec![ALPN.to_vec()])?;
+        let unspecified_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
+
+        let socket = std::net::UdpSocket::bind(unspecified_addr)?;
+        let server_abstract_socket = runtime.wrap_udp_socket(socket)?;
+        let server_capturing_socket = Arc::new(CapturingUdpSocket {
+            captured: OnceLock::new(),
+            socket: server_abstract_socket,
+        });
+        let server = quinn::Endpoint::new_with_abstract_socket(
+            EndpointConfig::default(),
+            Some(server_config),
+            server_capturing_socket.clone() as Arc<dyn quinn::AsyncUdpSocket>,
+            runtime.clone(),
+        )?;
+
+        tasks.spawn({
+            let server = server.clone();
+            async move {
+                while let Some(incoming) = server.accept().await {
+                    let conn = incoming.await?;
+                    // Aaaaand close it again
+                    conn.close(42u32.into(), b"all good, we done");
+                }
+
+                Ok(())
+            }
+        });
+
+        let client_config = StaticConfig {
+            keylog: false,
+            secret_key: SecretKey::generate(),
+            transport_config: Arc::new(TransportConfig::default()),
+        };
+
+        let socket = socket2::Socket::new(
+            socket2::Domain::for_address(unspecified_addr),
+            socket2::Type::DGRAM,
+            Some(socket2::Protocol::UDP),
+        )?;
+        socket.bind(&unspecified_addr.into())?;
+        let abstract_socket = runtime.wrap_udp_socket(socket.into())?;
+        let client = quinn::Endpoint::new_with_abstract_socket(
+            EndpointConfig::default(),
+            Some(client_config.create_server_config(vec![ALPN.to_vec()])?),
+            abstract_socket,
+            runtime.clone(),
+        )?;
+
+        let connecting = client.connect_with(
+            client_config.create_client_config(ALPN, static_config.secret_key.public())?,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), server.local_addr()?.port()),
+            "localhost",
+        )?;
+
+        let connection = connecting.await?;
+        let code = connection.closed().await;
+        println!("{code:?}");
+
+        // The client also acts as a "server" sometimes:
+        tasks.spawn({
+            let client = client.clone();
+            async move {
+                while let Some(incoming) = client.accept().await {
+                    let conn = incoming.await?;
+                    // Aaaaand close it again
+                    conn.close(42u32.into(), b"all good, we done");
+                }
+
+                Ok(())
+            }
+        });
+
+        let transmit = server_capturing_socket
+            .captured
+            .get()
+            .expect("nothing captured?");
+
+        tracing::info!("RESENDING CAPTURED");
+
+        server_capturing_socket
+            .socket
+            .try_send(&transmit.as_transmit())
+            .expect("unblocked");
+
+        tokio::time::sleep(Duration::from_millis(200)).await; // give the sockets some time to process
+
+        server.close(1u32.into(), b"shutdown");
+        client.close(1u32.into(), b"shutdown");
+
+        while let Some(result) = tasks.join_next().await {
+            result??;
+        }
+
+        Ok(())
+    }
+
+    struct OwnedTransmit {
+        destination: SocketAddr,
+        ecn: Option<quinn_udp::EcnCodepoint>,
+        contents: Vec<u8>,
+        segment_size: Option<usize>,
+        src_ip: Option<IpAddr>,
+    }
+
+    impl OwnedTransmit {
+        fn as_transmit(&self) -> quinn_udp::Transmit<'_> {
+            quinn_udp::Transmit {
+                destination: self.destination,
+                ecn: self.ecn.clone(),
+                contents: &self.contents,
+                segment_size: self.segment_size,
+                src_ip: self.src_ip,
+            }
+        }
+    }
+
+    impl From<&'_ quinn_udp::Transmit<'_>> for OwnedTransmit {
+        fn from(transmit: &'_ quinn_udp::Transmit<'_>) -> Self {
+            Self {
+                destination: transmit.destination,
+                ecn: None,
+                contents: transmit.contents.to_vec(),
+                segment_size: transmit.segment_size,
+                src_ip: None,
+            }
+        }
+    }
+
+    #[derive(derive_more::Debug)]
+    struct CapturingUdpSocket {
+        #[debug("OnceLock<OwnedTransmit>")]
+        captured: OnceLock<OwnedTransmit>,
+        socket: Arc<dyn quinn::AsyncUdpSocket>,
+    }
+
+    impl quinn::AsyncUdpSocket for CapturingUdpSocket {
+        fn create_io_poller(self: Arc<Self>) -> Pin<Box<dyn quinn::UdpPoller>> {
+            Arc::clone(&self.socket).create_io_poller()
+        }
+
+        fn try_send(&self, transmit: &quinn_udp::Transmit) -> std::io::Result<()> {
+            let len = transmit.segment_size.unwrap_or(transmit.contents.len());
+            if len > 1000 {
+                if let Ok(_) = self.captured.set(transmit.into()) {
+                    tracing::info!(len, "Captured a transmit for delayed sending");
+                } else {
+                    tracing::info!(len, "Already captured a transmit");
+                }
+            }
+            self.socket.try_send(transmit)
+        }
+
+        fn poll_recv(
+            &self,
+            cx: &mut std::task::Context,
+            bufs: &mut [std::io::IoSliceMut<'_>],
+            meta: &mut [quinn_udp::RecvMeta],
+        ) -> Poll<std::io::Result<usize>> {
+            self.socket.poll_recv(cx, bufs, meta)
+        }
+
+        fn local_addr(&self) -> std::io::Result<SocketAddr> {
+            self.socket.local_addr()
+        }
+
+        fn max_transmit_segments(&self) -> usize {
+            self.socket.max_transmit_segments()
+        }
+
+        fn max_receive_segments(&self) -> usize {
+            self.socket.max_receive_segments()
+        }
+
+        fn may_fragment(&self) -> bool {
+            self.socket.may_fragment()
+        }
     }
 }
