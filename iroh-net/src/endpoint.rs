@@ -1689,26 +1689,23 @@ mod tests {
     #[tokio::test]
     async fn test_quinn() -> TestResult {
         let _logging_guard = iroh_test::logging::setup();
+        let runtime = Arc::new(quinn::TokioRuntime);
 
         for i in 0..20 {
-            let mut tasks = tokio::task::JoinSet::<TestResult>::new();
-            let runtime = Arc::new(quinn::TokioRuntime);
+            let server_cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
+            let server_key =
+                rustls::pki_types::PrivatePkcs8KeyDer::from(server_cert.key_pair.serialize_der());
+            let server_cert = rustls::pki_types::CertificateDer::from(server_cert.cert);
+            let server_config = quinn::ServerConfig::with_single_cert(
+                vec![server_cert.clone()],
+                server_key.into(),
+            )?;
 
-            const ALPN: &[u8] = b"test/0";
-            let static_config = StaticConfig {
-                keylog: false,
-                secret_key: SecretKey::generate(),
-                transport_config: Arc::new(TransportConfig::default()),
-            };
-            let server_config = static_config.create_server_config(vec![ALPN.to_vec()])?;
             let unspecified_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
 
             let socket = std::net::UdpSocket::bind(unspecified_addr)?;
-            let server_abstract_socket = runtime.wrap_udp_socket(socket)?;
-            let server_capturing_socket = Arc::new(CapturingUdpSocket {
-                captured: OnceLock::new(),
-                socket: server_abstract_socket,
-            });
+            let server_capturing_socket =
+                Arc::new(CapturingUdpSocket::wrap(runtime.wrap_udp_socket(socket)?));
             let server = quinn::Endpoint::new_with_abstract_socket(
                 EndpointConfig::default(),
                 Some(server_config),
@@ -1716,7 +1713,7 @@ mod tests {
                 runtime.clone(),
             )?;
 
-            tasks.spawn({
+            let handle = tokio::task::spawn({
                 let server = server.clone();
                 async move {
                     while let Some(incoming) = server.accept().await {
@@ -1725,15 +1722,18 @@ mod tests {
                         conn.close(42u32.into(), b"all good, we done");
                     }
 
-                    Ok(())
+                    TestResult::Ok(())
                 }
             });
 
-            let client_config = StaticConfig {
-                keylog: false,
-                secret_key: SecretKey::generate(),
-                transport_config: Arc::new(TransportConfig::default()),
-            };
+            let client_cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
+            let client_key =
+                rustls::pki_types::PrivatePkcs8KeyDer::from(client_cert.key_pair.serialize_der());
+            let client_cert = rustls::pki_types::CertificateDer::from(client_cert.cert);
+            let client_server_config = quinn::ServerConfig::with_single_cert(
+                vec![client_cert.clone()],
+                client_key.into(),
+            )?;
 
             let socket = socket2::Socket::new(
                 socket2::Domain::for_address(unspecified_addr),
@@ -1744,57 +1744,49 @@ mod tests {
             let abstract_socket = runtime.wrap_udp_socket(socket.into())?;
             let client = quinn::Endpoint::new_with_abstract_socket(
                 EndpointConfig::default(),
-                Some(client_config.create_server_config(vec![ALPN.to_vec()])?),
+                Some(client_server_config),
                 abstract_socket,
                 runtime.clone(),
             )?;
 
-            let connecting = client.connect_with(
-                client_config.create_client_config(ALPN, static_config.secret_key.public())?,
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), server.local_addr()?.port()),
-                "localhost",
-            )?;
+            let mut roots = rustls::RootCertStore::empty();
+            roots.add(server_cert)?;
+            let client_crypto = rustls::ClientConfig::builder_with_provider(
+                rustls::crypto::ring::default_provider().into(),
+            )
+            .with_safe_default_protocol_versions()?
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+            let client_config = quinn::ClientConfig::new(Arc::new(
+                quinn_proto::crypto::rustls::QuicClientConfig::try_from(client_crypto)?,
+            ));
+
+            let server_addr =
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), server.local_addr()?.port());
+            let connecting = client.connect_with(client_config, server_addr, "localhost")?;
 
             let connection = connecting.await?;
             let code = connection.closed().await;
             println!("{code:?}");
 
-            // The client also acts as a "server" sometimes:
-            tasks.spawn({
-                let client = client.clone();
-                async move {
-                    while let Some(incoming) = client.accept().await {
-                        let conn = incoming.await?;
-                        // Aaaaand close it again
-                        conn.close(42u32.into(), b"all good, we done");
-                    }
+            server_capturing_socket.resend_captured()?;
 
-                    Ok(())
-                }
-            });
+            tracing::info!(i, "On iteration");
 
-            let transmit = server_capturing_socket
-                .captured
-                .get()
-                .expect("nothing captured?");
-
-            tracing::info!("RESENDING CAPTURED");
-
-            server_capturing_socket
-                .socket
-                .try_send(&transmit.as_transmit())
-                .expect("unblocked");
-
-            tokio::time::sleep(Duration::from_millis(200)).await; // give the sockets some time to process
+            // now the client acts as a "server"
+            // sometimes, it detects that the packet was bogus early and doesn't even accept an incoming
+            if let Ok(Some(incoming)) =
+                tokio::time::timeout(Duration::from_millis(100), client.accept()).await
+            {
+                let connecting = incoming.accept()?; // this fails
+                let conn = connecting.await?;
+                // Aaaaand close it again
+                conn.close(42u32.into(), b"all good, we done");
+            }
 
             server.close(1u32.into(), b"shutdown");
-            client.close(1u32.into(), b"shutdown");
 
-            tracing::info!(i, "Finished iteration");
-
-            while let Some(result) = tasks.join_next().await {
-                result??;
-            }
+            handle.await??;
         }
 
         Ok(())
@@ -1824,10 +1816,10 @@ mod tests {
         fn from(transmit: &'_ quinn_udp::Transmit<'_>) -> Self {
             Self {
                 destination: transmit.destination,
-                ecn: None,
+                ecn: transmit.ecn.clone(),
                 contents: transmit.contents.to_vec(),
                 segment_size: transmit.segment_size,
-                src_ip: None,
+                src_ip: transmit.src_ip,
             }
         }
     }
@@ -1839,19 +1831,35 @@ mod tests {
         socket: Arc<dyn quinn::AsyncUdpSocket>,
     }
 
+    impl CapturingUdpSocket {
+        fn wrap(socket: Arc<dyn quinn::AsyncUdpSocket>) -> Self {
+            Self {
+                captured: OnceLock::new(),
+                socket,
+            }
+        }
+
+        fn resend_captured(&self) -> std::io::Result<()> {
+            let transmit = self.captured.get().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::Other, "no packet captured to resend")
+            })?;
+
+            tracing::info!("RESENDING CAPTURED");
+
+            self.socket.try_send(&transmit.as_transmit())?;
+
+            Ok(())
+        }
+    }
+
     impl quinn::AsyncUdpSocket for CapturingUdpSocket {
         fn create_io_poller(self: Arc<Self>) -> Pin<Box<dyn quinn::UdpPoller>> {
             Arc::clone(&self.socket).create_io_poller()
         }
 
         fn try_send(&self, transmit: &quinn_udp::Transmit) -> std::io::Result<()> {
-            let len = transmit.segment_size.unwrap_or(transmit.contents.len());
-            if len > 1000 {
-                if let Ok(_) = self.captured.set(transmit.into()) {
-                    tracing::info!(len, "Captured a transmit for delayed sending");
-                } else {
-                    tracing::info!(len, "Already captured a transmit");
-                }
+            if let Ok(_) = self.captured.set(transmit.into()) {
+                tracing::info!("Captured a transmit for delayed resending");
             }
             self.socket.try_send(transmit)
         }

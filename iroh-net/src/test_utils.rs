@@ -28,43 +28,44 @@ pub struct CleanupDropGuard(pub(crate) oneshot::Sender<()>);
 /// The returned `Url` is the url of the relay server in the returned [`RelayMap`].
 /// When dropped, the returned [`Server`] does will stop running.
 pub async fn run_relay_server() -> Result<(RelayMap, RelayUrl, Server)> {
-    let secret_key = SecretKey::generate();
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
-    let rustls_cert = rustls::pki_types::CertificateDer::from(cert.serialize_der().unwrap());
-    let private_key =
-        rustls::pki_types::PrivatePkcs8KeyDer::from(cert.get_key_pair().serialize_der());
-    let private_key = rustls::pki_types::PrivateKeyDer::from(private_key);
+    // let secret_key = SecretKey::generate();
+    // // let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+    // let cert: rcgen::Certificate = todo!();
+    // let rustls_cert = rustls::pki_types::CertificateDer::from(cert.serialize_der().unwrap());
+    // let private_key = rustls::pki_types::PrivatePkcs8KeyDer::from(cert.params().key.serialize_der());
+    // let private_key = rustls::pki_types::PrivateKeyDer::from(private_key);
 
-    let config = ServerConfig {
-        relay: Some(RelayConfig {
-            http_bind_addr: (Ipv4Addr::LOCALHOST, 0).into(),
-            secret_key,
-            tls: Some(TlsConfig {
-                cert: CertConfig::<(), ()>::Manual {
-                    private_key,
-                    certs: vec![rustls_cert],
-                },
-                https_bind_addr: (Ipv4Addr::LOCALHOST, 0).into(),
-            }),
-            limits: Default::default(),
-        }),
-        stun: Some(StunConfig {
-            bind_addr: (Ipv4Addr::LOCALHOST, 0).into(),
-        }),
-        #[cfg(feature = "metrics")]
-        metrics_addr: None,
-    };
-    let server = Server::spawn(config).await.unwrap();
-    let url: RelayUrl = format!("https://localhost:{}", server.https_addr().unwrap().port())
-        .parse()
-        .unwrap();
-    let m = RelayMap::from_nodes([RelayNode {
-        url: url.clone(),
-        stun_only: false,
-        stun_port: server.stun_addr().unwrap().port(),
-    }])
-    .unwrap();
-    Ok((m, url, server))
+    // let config = ServerConfig {
+    //     relay: Some(RelayConfig {
+    //         http_bind_addr: (Ipv4Addr::LOCALHOST, 0).into(),
+    //         secret_key,
+    //         tls: Some(TlsConfig {
+    //             cert: CertConfig::<(), ()>::Manual {
+    //                 private_key,
+    //                 certs: vec![rustls_cert],
+    //             },
+    //             https_bind_addr: (Ipv4Addr::LOCALHOST, 0).into(),
+    //         }),
+    //         limits: Default::default(),
+    //     }),
+    //     stun: Some(StunConfig {
+    //         bind_addr: (Ipv4Addr::LOCALHOST, 0).into(),
+    //     }),
+    //     #[cfg(feature = "metrics")]
+    //     metrics_addr: None,
+    // };
+    // let server = Server::spawn(config).await.unwrap();
+    // let url: RelayUrl = format!("https://localhost:{}", server.https_addr().unwrap().port())
+    //     .parse()
+    //     .unwrap();
+    // let m = RelayMap::from_nodes([RelayNode {
+    //     url: url.clone(),
+    //     stun_only: false,
+    //     stun_port: server.stun_addr().unwrap().port(),
+    // }])
+    // .unwrap();
+    // Ok((m, url, server))
+    todo!()
 }
 
 pub(crate) mod dns_and_pkarr_servers {

@@ -360,17 +360,20 @@ impl ServerActor {
 /// corp-mandated root certs on employee machines and TLS proxy cleans up
 /// unnecessary certs. In that case we just fall back to the extra RTT.
 fn init_meta_cert(server_key: &PublicKey) -> Vec<u8> {
-    let mut params =
-        rcgen::CertificateParams::new([format!("derpkey{}", hex::encode(server_key.as_bytes()))]);
-    params.serial_number = Some((PROTOCOL_VERSION as u64).into());
-    // Windows requires not_after and not_before set:
-    params.not_after = time::OffsetDateTime::now_utc().saturating_add(30 * time::Duration::DAY);
-    params.not_before = time::OffsetDateTime::now_utc().saturating_sub(30 * time::Duration::DAY);
+    // let mut params =
+    //     rcgen::CertificateParams::new([format!("derpkey{}", hex::encode(server_key.as_bytes()))])
+    //         .unwrap();
+    // params.serial_number = Some((PROTOCOL_VERSION as u64).into());
+    // // Windows requires not_after and not_before set:
+    // params.not_after = time::OffsetDateTime::now_utc().saturating_add(30 * time::Duration::DAY);
+    // params.not_before = time::OffsetDateTime::now_utc().saturating_sub(30 * time::Duration::DAY);
 
-    rcgen::Certificate::from_params(params)
-        .expect("fixed inputs")
-        .serialize_der()
-        .expect("fixed allocations")
+    // rcgen::Certificate::from(params.self_signed(key_pair))
+    //     .expect("fixed inputs")
+    //     .serialize_der()
+    //     .expect("fixed allocations")
+
+    todo!()
 }
 
 struct ClientCounter {
