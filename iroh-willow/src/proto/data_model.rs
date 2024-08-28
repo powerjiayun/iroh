@@ -233,34 +233,21 @@ pub mod serde_encoding {
 
     use super::*;
 
-    pub mod path {
-
+    pub mod willow_serde {
         use super::*;
-        pub fn serialize<S: Serializer>(path: &Path, serializer: S) -> Result<S::Ok, S::Error> {
-            to_vec(path).serialize(serializer)
+
+        pub fn serialize<T: Encodable, S: Serializer>(
+            encodable: &T,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            let vec = to_vec(encodable);
+            serde_bytes::serialize(&vec, serializer)
         }
 
-        pub fn deserialize<'de, D>(deserializer: D) -> Result<Path, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
-            let decoded = from_bytes(&bytes).map_err(de::Error::custom)?;
-            Ok(decoded)
-        }
-    }
-
-    pub mod entry {
-        use super::*;
-        pub fn serialize<S: Serializer>(entry: &Entry, serializer: S) -> Result<S::Ok, S::Error> {
-            to_vec(entry).serialize(serializer)
-        }
-
-        pub fn deserialize<'de, D>(deserializer: D) -> Result<Entry, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let bytes: Vec<u8> = Deserialize::deserialize(deserializer)?;
+        pub fn deserialize<'de, D: Deserializer<'de>, T: Decodable>(
+            deserializer: D,
+        ) -> Result<T, D::Error> {
+            let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
             let decoded = from_bytes(&bytes).map_err(de::Error::custom)?;
             Ok(decoded)
         }
@@ -276,7 +263,7 @@ pub mod serde_encoding {
         Serialize,
         Deserialize,
     )]
-    pub struct SerdeEntry(#[serde(with = "entry")] pub Entry);
+    pub struct SerdeEntry(#[serde(with = "willow_serde")] pub Entry);
 
     pub mod authorised_entry {
         use crate::proto::meadowcap::serde_encoding::SerdeMcCapability;

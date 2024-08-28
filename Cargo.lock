@@ -3042,6 +3042,7 @@ dependencies = [
  "rand_core",
  "redb 2.1.1",
  "serde",
+ "serde_bytes",
  "sha2",
  "strum 0.26.3",
  "syncify",
