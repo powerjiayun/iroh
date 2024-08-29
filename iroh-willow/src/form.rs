@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncRead;
 
 use crate::proto::{
-    data_model::{self, Entry, NamespaceId, Path, SerdeWriteCapability, SubspaceId, Timestamp},
+    data_model::{Entry, NamespaceId, Path, SerdeWriteCapability, SubspaceId, Timestamp},
     keys::UserId,
 };
 
@@ -154,7 +154,7 @@ pub enum TimestampForm {
 /// Either a [`Entry`] or a [`EntryForm`].
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SerdeEntryOrForm {
-    Entry(#[serde(with = "data_model::serde_encoding::entry")] Entry),
+    Entry(#[serde(with = "crate::util::willow_serde")] Entry),
     Form(SerdeEntryForm),
 }
 
@@ -172,7 +172,7 @@ impl From<SerdeEntryOrForm> for EntryOrForm {
 pub struct SerdeEntryForm {
     pub namespace_id: NamespaceId,
     pub subspace_id: SubspaceForm,
-    #[serde(with = "data_model::serde_encoding::path")]
+    #[serde(with = "crate::util::willow_serde")]
     pub path: Path,
     pub timestamp: TimestampForm,
     pub payload: SerdePayloadForm,

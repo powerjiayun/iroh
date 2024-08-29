@@ -229,29 +229,7 @@ mod encoding {
 pub mod serde_encoding {
     use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
-    use crate::util::codec2::{from_bytes, to_vec};
-
     use super::*;
-
-    pub mod willow_serde {
-        use super::*;
-
-        pub fn serialize<T: Encodable, S: Serializer>(
-            encodable: &T,
-            serializer: S,
-        ) -> Result<S::Ok, S::Error> {
-            let vec = to_vec(encodable);
-            serde_bytes::serialize(&vec, serializer)
-        }
-
-        pub fn deserialize<'de, D: Deserializer<'de>, T: Decodable>(
-            deserializer: D,
-        ) -> Result<T, D::Error> {
-            let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
-            let decoded = from_bytes(&bytes).map_err(de::Error::custom)?;
-            Ok(decoded)
-        }
-    }
 
     /// [`Entry`] wrapper that can be serialized with [`serde`].
     #[derive(
@@ -263,7 +241,7 @@ pub mod serde_encoding {
         Serialize,
         Deserialize,
     )]
-    pub struct SerdeEntry(#[serde(with = "willow_serde")] pub Entry);
+    pub struct SerdeEntry(#[serde(with = "crate::util::willow_serde")] pub Entry);
 
     pub mod authorised_entry {
         use crate::proto::meadowcap::serde_encoding::SerdeMcCapability;

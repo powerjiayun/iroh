@@ -95,7 +95,7 @@ impl AreaExt for Area {
 /// I.e. an entry.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Point {
-    #[serde(with = "data_model::serde_encoding::path")]
+    #[serde(with = "crate::util::willow_serde")]
     pub path: Path,
     pub timestamp: Timestamp,
     pub subspace_id: SubspaceId,
