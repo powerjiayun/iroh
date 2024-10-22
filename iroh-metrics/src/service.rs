@@ -117,8 +117,8 @@ async fn dump_metrics(
     Ok(())
 }
 
-/// Export metrics to a push gateway.
-pub async fn exporter(
+/// Export metrics to a push gateway periodically.
+pub async fn export_periodically(
     gateway_endpoint: String,
     service_name: String,
     instance_name: String,
@@ -131,38 +131,75 @@ pub async fn exporter(
         return;
     };
     let push_client = reqwest::Client::new();
-    let prom_gateway_uri = format!(
-        "{}/metrics/job/{}/instance/{}",
-        gateway_endpoint, service_name, instance_name
-    );
     loop {
         tokio::time::sleep(interval).await;
-        let buff = core.encode();
-        match buff {
-            Err(e) => error!("Failed to encode metrics: {e:#}"),
-            Ok(buff) => {
-                let mut req = push_client.post(&prom_gateway_uri);
-                if let Some(username) = username.clone() {
-                    req = req.basic_auth(username, Some(password.clone()));
-                }
-                let res = match req.body(buff).send().await {
-                    Ok(res) => res,
-                    Err(e) => {
-                        warn!("failed to push metrics: {}", e);
-                        continue;
-                    }
-                };
-                match res.status() {
-                    reqwest::StatusCode::OK => {
-                        debug!("pushed metrics to gateway");
-                    }
-                    _ => {
-                        warn!("failed to push metrics to gateway: {:?}", res);
-                        let body = res.text().await.unwrap();
-                        warn!("error body: {}", body);
-                    }
-                }
-            }
+        if let Err(e) = run_export_request(
+            &gateway_endpoint,
+            &service_name,
+            &instance_name,
+            &username,
+            &password,
+            core,
+            &push_client,
+        )
+        .await
+        {
+            warn!("failed to push metrics: {e}");
+        };
+    }
+}
+
+/// Export metrics to a push gateway once.
+pub async fn export_once(
+    gateway_endpoint: String,
+    service_name: String,
+    instance_name: String,
+    username: Option<String>,
+    password: String,
+) -> Result<()> {
+    let Some(core) = Core::get() else {
+        anyhow::bail!("metrics disabled");
+    };
+    let push_client = reqwest::Client::new();
+    run_export_request(
+        &gateway_endpoint,
+        &service_name,
+        &instance_name,
+        &username,
+        &password,
+        core,
+        &push_client,
+    )
+    .await
+}
+
+async fn run_export_request(
+    gateway_endpoint: &String,
+    service_name: &String,
+    instance_name: &String,
+    username: &Option<String>,
+    password: &String,
+    core: &Core,
+    push_client: &reqwest::Client,
+) -> Result<()> {
+    let prom_gateway_uri =
+        format!("{gateway_endpoint}/metrics/job/{service_name}/instance/{instance_name}");
+    let buff = core.encode()?;
+    let mut req = push_client.post(&prom_gateway_uri);
+    if let Some(username) = username.clone() {
+        req = req.basic_auth(username, Some(password.clone()));
+    }
+    let res = req.body(buff).send().await?;
+    match res.status() {
+        reqwest::StatusCode::OK => {
+            debug!("pushed metrics to gateway");
+        }
+        _ => {
+            warn!("failed to push metrics to gateway: {:?}", res);
+            let body = res.text().await.unwrap();
+            warn!("error body: {}", body);
+            anyhow::bail!("export request failed");
         }
     }
+    Ok(())
 }

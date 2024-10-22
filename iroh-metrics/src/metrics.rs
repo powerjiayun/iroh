@@ -44,18 +44,14 @@
 //! inc!(Metrics, things_added);
 //! ```
 
-// TODO: move cfg to lib.rs
-#[cfg(feature = "metrics")]
 use std::net::SocketAddr;
 
 /// Start a server to serve the OpenMetrics endpoint.
-#[cfg(feature = "metrics")]
 pub async fn start_metrics_server(addr: SocketAddr) -> anyhow::Result<()> {
     crate::service::run(addr).await
 }
 
 /// Start a metrics dumper service.
-#[cfg(feature = "metrics")]
 pub async fn start_metrics_dumper(
     path: std::path::PathBuf,
     interval: std::time::Duration,
@@ -64,9 +60,8 @@ pub async fn start_metrics_dumper(
 }
 
 /// Start a metrics exporter service.
-#[cfg(feature = "metrics")]
 pub async fn start_metrics_exporter(cfg: crate::PushMetricsConfig) {
-    crate::service::exporter(
+    crate::service::export_periodically(
         cfg.endpoint,
         cfg.service_name,
         cfg.instance_name,
@@ -75,4 +70,16 @@ pub async fn start_metrics_exporter(cfg: crate::PushMetricsConfig) {
         std::time::Duration::from_secs(cfg.interval),
     )
     .await;
+}
+
+/// Export current metrics to a push gateway once.
+pub async fn export_metrics_once(cfg: crate::PushMetricsConfig) -> anyhow::Result<()> {
+    crate::service::export_once(
+        cfg.endpoint,
+        cfg.service_name,
+        cfg.instance_name,
+        cfg.username,
+        cfg.password,
+    )
+    .await
 }
