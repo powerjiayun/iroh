@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [ubuntu-latest, macOS-arm-latest, maxOS-x64-latest]
+        name: [ubuntu-latest, macOS-arm-latest, macOS-x64-latest]
         rust: [ '${{ inputs.rust-version }}' ]
         features: [all, none, default]
         include:
