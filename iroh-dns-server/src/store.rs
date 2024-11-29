@@ -11,7 +11,7 @@ use pkarr::{mainline::dht::DhtSettings, PkarrClient, SignedPacket};
 use tracing::{debug, trace};
 use ttl_cache::TtlCache;
 
-use self::signed_packets::SignedPacketStore;
+pub use self::signed_packets::SignedPacketStore;
 use crate::{
     config::BootstrapOption,
     metrics::Metrics,

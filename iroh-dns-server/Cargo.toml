@@ -63,6 +63,12 @@ hickory-resolver = "=0.25.0-alpha.2"
 iroh = { version = "0.28.0", path = "../iroh" }
 iroh-test = { version = "0.28.0", path = "../iroh-test" }
 pkarr = { version = "2.2.0", features = ["rand"] }
+criterion = "0.3"
+tempfile = "3.14.0"
 
 [package.metadata.docs.rs]
 all-features = true
+
+[[bench]]
+name = "store"
+harness = false
