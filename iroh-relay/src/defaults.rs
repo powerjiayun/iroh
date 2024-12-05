@@ -26,6 +26,7 @@ pub(crate) mod timeouts {
     /// Timeout for our async dns resolver
     pub(crate) const DNS_TIMEOUT: Duration = Duration::from_secs(1);
 
+    // TODO: make sure we use this timeout again
     /// Maximum time the client will wait to receive on the connection, since
     /// the last message. Longer than this time and the client will consider
     /// the connection dead.
