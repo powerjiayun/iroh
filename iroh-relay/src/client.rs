@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+use anyhow::anyhow;
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use bytes::Bytes;
 use conn::{Conn, ConnBuilder, ConnReader, ConnReceiver, ConnWriter, ReceivedMessage};
@@ -149,6 +150,7 @@ pub struct ClientReceiver {
 struct Actor {
     secret_key: SecretKey,
     is_preferred: bool,
+    #[debug("Option<(Conn, ConnReceiver)")]
     relay_conn: Option<(Conn, ConnReceiver)>,
     is_closed: bool,
     #[debug("address family selector callback")]
@@ -986,17 +988,24 @@ impl Actor {
     async fn recv_detail(&mut self) -> Result<ReceivedMessage, ClientError> {
         if let Some((_conn, conn_receiver)) = self.relay_conn.as_mut() {
             trace!("recv_detail tick");
-            match conn_receiver.recv().await {
-                Ok(msg) => {
+            match conn_receiver.next().await {
+                Some(Ok(msg)) => {
                     return Ok(msg);
                 }
-                Err(e) => {
+                Some(Err(e)) => {
                     self.close_for_reconnect().await;
                     if self.is_closed {
                         return Err(ClientError::Closed);
                     }
                     // TODO(ramfox): more specific error?
                     return Err(ClientError::Receive(e));
+                }
+                None => {
+                    self.close_for_reconnect().await;
+                    if self.is_closed {
+                        return Err(ClientError::Closed);
+                    }
+                    return Err(ClientError::Receive(anyhow!("stream closed")));
                 }
             }
         }

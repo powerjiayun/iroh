@@ -661,6 +661,7 @@ mod tests {
 
     use anyhow::Result;
     use bytes::Bytes;
+    use futures_lite::StreamExt;
     use iroh_base::key::{PublicKey, SecretKey};
     use reqwest::Url;
     use tokio::{sync::mpsc, task::JoinHandle};
@@ -950,7 +951,7 @@ mod tests {
         // send message from a to b!
         let msg = Bytes::from_static(b"hello client b!!");
         client_a.send(public_key_b, msg.clone()).await?;
-        match client_receiver_b.recv().await? {
+        match client_receiver_b.next().await.context("eos")?? {
             ReceivedMessage::ReceivedPacket {
                 remote_node_id,
                 data,
@@ -966,7 +967,7 @@ mod tests {
         // send message from b to a!
         let msg = Bytes::from_static(b"nice to meet you client a!!");
         client_b.send(public_key_a, msg.clone()).await?;
-        match client_receiver_a.recv().await? {
+        match client_receiver_a.next().await.context("eos")?? {
             ReceivedMessage::ReceivedPacket {
                 remote_node_id,
                 data,
@@ -987,7 +988,7 @@ mod tests {
             .send(public_key_b, Bytes::from_static(b"try to send"))
             .await;
         assert!(res.is_err());
-        assert!(client_receiver_b.recv().await.is_err());
+        assert!(client_receiver_b.next().await.context("eos")?.is_err());
         Ok(())
     }
 
@@ -1036,7 +1037,7 @@ mod tests {
         // send message from a to b!
         let msg = Bytes::from_static(b"hello client b!!");
         client_a.send(public_key_b, msg.clone()).await?;
-        match client_receiver_b.recv().await? {
+        match client_receiver_b.next().await.context("eos")?? {
             ReceivedMessage::ReceivedPacket {
                 remote_node_id,
                 data,
@@ -1052,7 +1053,7 @@ mod tests {
         // send message from b to a!
         let msg = Bytes::from_static(b"nice to meet you client a!!");
         client_b.send(public_key_a, msg.clone()).await?;
-        match client_receiver_a.recv().await? {
+        match client_receiver_a.next().await.context("eos")?? {
             ReceivedMessage::ReceivedPacket {
                 remote_node_id,
                 data,
@@ -1080,7 +1081,7 @@ mod tests {
         // send message from a to b!
         let msg = Bytes::from_static(b"are you still there, b?!");
         client_a.send(public_key_b, msg.clone()).await?;
-        match new_client_receiver_b.recv().await? {
+        match new_client_receiver_b.next().await.context("eos")?? {
             ReceivedMessage::ReceivedPacket {
                 remote_node_id,
                 data,
@@ -1096,7 +1097,7 @@ mod tests {
         // send message from b to a!
         let msg = Bytes::from_static(b"just had a spot of trouble but I'm back now,a!!");
         new_client_b.send(public_key_a, msg.clone()).await?;
-        match client_receiver_a.recv().await? {
+        match client_receiver_a.next().await.context("eos")?? {
             ReceivedMessage::ReceivedPacket {
                 remote_node_id,
                 data,
@@ -1117,7 +1118,7 @@ mod tests {
             .send(public_key_b, Bytes::from_static(b"try to send"))
             .await;
         assert!(res.is_err());
-        assert!(new_client_receiver_b.recv().await.is_err());
+        assert!(new_client_receiver_b.next().await.context("eos")?.is_err());
         Ok(())
     }
 }

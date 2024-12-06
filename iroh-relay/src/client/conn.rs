@@ -15,7 +15,7 @@ use bytes::Bytes;
 use futures_lite::Stream;
 use futures_sink::Sink;
 use futures_util::{
-    stream::{SplitSink, SplitStream, StreamExt},
+    stream::{SplitSink, SplitStream},
     SinkExt,
 };
 use iroh_base::key::{NodeId, SecretKey};
@@ -102,9 +102,7 @@ impl ConnBuilder {
             }),
         };
 
-        let conn_receiver = ConnReceiver {
-            stream: ConnMessageReader { inner: reader },
-        };
+        let conn_receiver = ConnReceiver { inner: reader };
 
         Ok((conn, conn_receiver))
     }
@@ -202,29 +200,6 @@ impl Conn {
     }
 }
 
-/// The channel on which a relay connection sends received messages.
-///
-/// The [`Conn`] to a relay is easily clonable but can only send DISCO messages to a relay
-/// server.  This is the counterpart which receives DISCO messages from the relay server for
-/// a connection.  It is not clonable.
-#[derive(derive_more::Debug)]
-pub struct ConnReceiver {
-    #[debug("impl Stream<Item = Result<ReceivedMessage>")]
-    stream: ConnMessageReader,
-}
-
-impl ConnReceiver {
-    /// Reads a messages from a relay server.
-    ///
-    /// Once it returns an error, the [`Conn`] is dead forever.
-    pub async fn recv(&mut self) -> Result<ReceivedMessage> {
-        match self.stream.next().await {
-            Some(item) => item,
-            None => panic!("oops i guess"), // TODO
-        }
-    }
-}
-
 #[derive(derive_more::Debug)]
 pub struct ConnTasks {
     /// Our local address, if known.
@@ -305,11 +280,12 @@ impl Stream for ConnReader {
     }
 }
 
-pub(crate) struct ConnMessageReader {
+/// The stream receiving [`DerpCodec`] messages from the relay server.
+pub(crate) struct ConnReceiver {
     inner: ConnReader,
 }
 
-impl Stream for ConnMessageReader {
+impl Stream for ConnReceiver {
     type Item = Result<ReceivedMessage>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -425,8 +401,10 @@ enum ConnWriterMessage {
     Shutdown,
 }
 
+/// The messages from received from a [`DerpCodec`] stream.
+///
+/// This is a type-validated version of the [`Frame`].
 #[derive(derive_more::Debug, Clone)]
-/// The type of message received by the [`Conn`] from a relay server.
 pub enum ReceivedMessage {
     /// Represents an incoming packet.
     ReceivedPacket {
