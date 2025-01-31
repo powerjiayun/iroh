@@ -15,7 +15,6 @@
 
 use std::{future::Future, net::IpAddr};
 
-use anyhow::Context;
 use bytes::Bytes;
 use data_encoding::BASE64URL;
 use http_body_util::Empty;
@@ -41,7 +40,7 @@ impl ClientBuilder {
     /// set to [`HTTP_UPGRADE_PROTOCOL`].
     ///
     /// [`HTTP_UPGRADE_PROTOCOL`]: crate::http::HTTP_UPGRADE_PROTOCOL
-    pub(super) async fn connect_relay(&self) -> Result<(Conn, SocketAddr)> {
+    pub(super) async fn connect_relay(&self) -> Result<(Conn, SocketAddr), Error> {
         let roots = rustls::RootCertStore {
             roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
         };
@@ -65,9 +64,7 @@ impl ClientBuilder {
         let url = self.url.clone();
         let tcp_stream = self.dial_url(&tls_connector).await?;
 
-        let local_addr = tcp_stream
-            .local_addr()
-            .context("No local addr for TCP stream")?;
+        let local_addr = tcp_stream.local_addr()?;
 
         debug!(server_addr = ?tcp_stream.peer_addr(), %local_addr, "TCP stream connected");
 
@@ -107,7 +104,10 @@ impl ClientBuilder {
     }
 
     /// Sends the HTTP upgrade request to the relay server.
-    async fn start_upgrade<T>(io: T, relay_url: RelayUrl) -> Result<hyper::Response<Incoming>>
+    async fn start_upgrade<T>(
+        io: T,
+        relay_url: RelayUrl,
+    ) -> Result<hyper::Response<Incoming>, Error>
     where
         T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     {
@@ -147,7 +147,10 @@ impl ClientBuilder {
             .and_then(|s| rustls::pki_types::ServerName::try_from(s).ok())
     }
 
-    async fn dial_url(&self, tls_connector: &tokio_rustls::TlsConnector) -> Result<ProxyStream> {
+    async fn dial_url(
+        &self,
+        tls_connector: &tokio_rustls::TlsConnector,
+    ) -> Result<ProxyStream, Error> {
         if let Some(ref proxy) = self.proxy_url {
             let stream = self.dial_url_proxy(proxy.clone(), tls_connector).await?;
             Ok(ProxyStream::Proxied(stream))
@@ -157,7 +160,7 @@ impl ClientBuilder {
         }
     }
 
-    async fn dial_url_direct(&self) -> Result<tokio::net::TcpStream> {
+    async fn dial_url_direct(&self) -> Result<tokio::net::TcpStream, Error> {
         use tokio::net::TcpStream;
         debug!(%self.url, "dial url");
         let prefer_ipv6 = self.prefer_ipv6();
@@ -166,7 +169,7 @@ impl ClientBuilder {
             .resolve_host(&self.url, prefer_ipv6)
             .await?;
 
-        let port = url_port(&self.url).ok_or_else(|| anyhow!("Missing URL port"))?;
+        let port = url_port(&self.url).ok_or(Error::InvalidTargetPort)?;
         let addr = SocketAddr::new(dst_ip, port);
 
         debug!("connecting to {}", addr);
@@ -186,7 +189,7 @@ impl ClientBuilder {
         &self,
         proxy_url: Url,
         tls_connector: &tokio_rustls::TlsConnector,
-    ) -> Result<util::Chain<std::io::Cursor<Bytes>, MaybeTlsStream>> {
+    ) -> Result<util::Chain<std::io::Cursor<Bytes>, MaybeTlsStream>, Error> {
         use hyper_util::rt::TokioIo;
         use tokio::net::TcpStream;
         debug!(%self.url, %proxy_url, "dial url via proxy");
@@ -198,7 +201,7 @@ impl ClientBuilder {
             .resolve_host(&proxy_url, prefer_ipv6)
             .await?;
 
-        let proxy_port = url_port(&proxy_url).ok_or_else(|| anyhow!("Missing proxy url port"))?;
+        let proxy_port = url_port(&proxy_url).ok_or(Error::InvalidTargetPort)?;
         let proxy_addr = SocketAddr::new(proxy_ip, proxy_port);
 
         debug!(%proxy_addr, "connecting to proxy");
@@ -223,12 +226,9 @@ impl ClientBuilder {
         };
         let io = TokioIo::new(io);
 
-        let target_host = self
-            .url
-            .host_str()
-            .ok_or_else(|| anyhow!("Missing proxy host"))?;
+        let target_host = self.url.host_str().ok_or(Error::MissingProxyHost)?;
 
-        let port = url_port(&self.url).ok_or_else(|| anyhow!("invalid target port"))?;
+        let port = url_port(&self.url).ok_or(Error::InvalidTargetPort)?;
 
         // Establish Proxy Tunnel
         let mut req_builder = Request::builder()
@@ -268,9 +268,9 @@ impl ClientBuilder {
         }
 
         let upgraded = hyper::upgrade::on(res).await?;
-        let Ok(Parts { io, read_buf, .. }) = upgraded.downcast::<TokioIo<MaybeTlsStream>>() else {
-            bail!("Invalid upgrade");
-        };
+        let Parts { io, read_buf, .. } = upgraded
+            .downcast::<TokioIo<MaybeTlsStream>>()
+            .expect("only this upgrade used");
 
         let res = util::chain(std::io::Cursor::new(read_buf), io.into_inner());
 
@@ -290,9 +290,11 @@ impl ClientBuilder {
     }
 }
 
-fn host_header_value(relay_url: RelayUrl) -> Result<String> {
+fn host_header_value(relay_url: RelayUrl) -> Result<String, Error> {
     // grab the host, turns e.g. https://example.com:8080/xyz -> example.com.
-    let relay_url_host = relay_url.host_str().context("Invalid URL")?;
+    let relay_url_host = relay_url
+        .host_str()
+        .ok_or_else(|| Error::InvalidUrl(relay_url.clone().into()))?;
     // strip the trailing dot, if present: example.com. -> example.com
     let relay_url_host = relay_url_host.strip_suffix('.').unwrap_or(relay_url_host);
     // build the host header value (reserve up to 6 chars for the ":" and port digits):
@@ -317,46 +319,76 @@ fn url_port(url: &Url) -> Option<u16> {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum DnsError {
+    #[error(transparent)]
+    Timeout(#[from] tokio::time::error::Elapsed),
+    #[error("No response")]
+    NoResponse,
+    #[error("Resolve failed ipv4: {ipv4}, ipv6 {ipv6}")]
+    ResolveBoth {
+        ipv4: Box<DnsError>,
+        ipv6: Box<DnsError>,
+    },
+    #[error("missing host")]
+    MissingHost,
+    #[error(transparent)]
+    Resolve(#[from] hickory_resolver::ResolveError),
+}
+
 trait DnsExt {
     fn lookup_ipv4<N: hickory_resolver::IntoName>(
         &self,
         host: N,
-    ) -> impl Future<Output = Result<Option<IpAddr>>>;
+    ) -> impl Future<Output = Result<Option<IpAddr>, DnsError>>;
 
     fn lookup_ipv6<N: hickory_resolver::IntoName>(
         &self,
         host: N,
-    ) -> impl Future<Output = Result<Option<IpAddr>>>;
+    ) -> impl Future<Output = Result<Option<IpAddr>, DnsError>>;
 
-    fn resolve_host(&self, url: &Url, prefer_ipv6: bool) -> impl Future<Output = Result<IpAddr>>;
+    fn resolve_host(
+        &self,
+        url: &Url,
+        prefer_ipv6: bool,
+    ) -> impl Future<Output = Result<IpAddr, DnsError>>;
 }
 
 impl DnsExt for DnsResolver {
-    async fn lookup_ipv4<N: hickory_resolver::IntoName>(&self, host: N) -> Result<Option<IpAddr>> {
+    async fn lookup_ipv4<N: hickory_resolver::IntoName>(
+        &self,
+        host: N,
+    ) -> Result<Option<IpAddr>, DnsError> {
         let addrs = tokio::time::timeout(DNS_TIMEOUT, self.ipv4_lookup(host)).await??;
         Ok(addrs.into_iter().next().map(|ip| IpAddr::V4(ip.0)))
     }
 
-    async fn lookup_ipv6<N: hickory_resolver::IntoName>(&self, host: N) -> Result<Option<IpAddr>> {
+    async fn lookup_ipv6<N: hickory_resolver::IntoName>(
+        &self,
+        host: N,
+    ) -> Result<Option<IpAddr>, DnsError> {
         let addrs = tokio::time::timeout(DNS_TIMEOUT, self.ipv6_lookup(host)).await??;
         Ok(addrs.into_iter().next().map(|ip| IpAddr::V6(ip.0)))
     }
 
-    async fn resolve_host(&self, url: &Url, prefer_ipv6: bool) -> Result<IpAddr> {
-        let host = url.host().context("Invalid URL")?;
+    async fn resolve_host(&self, url: &Url, prefer_ipv6: bool) -> Result<IpAddr, DnsError> {
+        let host = url.host().ok_or(DnsError::MissingHost)?;
         match host {
             url::Host::Domain(domain) => {
                 // Need to do a DNS lookup
                 let lookup = tokio::join!(self.lookup_ipv4(domain), self.lookup_ipv6(domain));
                 let (v4, v6) = match lookup {
-                    (Err(ipv4_err), Err(ipv6_err)) => {
-                        bail!("Ipv4: {ipv4_err:?}, Ipv6: {ipv6_err:?}");
+                    (Err(ipv4), Err(ipv6)) => {
+                        return Err(DnsError::ResolveBoth {
+                            ipv4: Box::new(ipv4),
+                            ipv6: Box::new(ipv6),
+                        });
                     }
                     (Err(_), Ok(v6)) => (None, v6),
                     (Ok(v4), Err(_)) => (v4, None),
                     (Ok(v4), Ok(v6)) => (v4, v6),
                 };
-                if prefer_ipv6 { v6.or(v4) } else { v4.or(v6) }.context("No response")
+                if prefer_ipv6 { v6.or(v4) } else { v4.or(v6) }.ok_or(DnsError::NoResponse)
             }
             url::Host::Ipv4(ip) => Ok(IpAddr::V4(ip)),
             url::Host::Ipv6(ip) => Ok(IpAddr::V6(ip)),
@@ -368,12 +400,12 @@ impl DnsExt for DnsResolver {
 mod tests {
     use std::str::FromStr;
 
-    use anyhow::Result;
+    use testresult::TestResult;
 
     use super::*;
 
     #[test]
-    fn test_host_header_value() -> Result<()> {
+    fn test_host_header_value() -> TestResult {
         let _guard = iroh_test::logging::setup();
 
         let cases = [

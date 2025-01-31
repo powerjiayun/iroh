@@ -567,7 +567,7 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn test_client_actor_basic() -> Result<()> {
+    async fn test_client_actor_basic() -> TestResult {
         let _logging = iroh_test::logging::setup();
 
         let (send_queue_s, send_queue_r) = mpsc::channel(10);

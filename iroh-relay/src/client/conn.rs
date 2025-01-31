@@ -17,7 +17,7 @@ use tokio_tungstenite_wasm::WebSocketStream;
 use tokio_util::codec::Framed;
 use tracing::debug;
 
-use super::KeyCache;
+use super::{Error, KeyCache};
 use crate::protos::relay::{ClientInfo, Frame, MAX_PACKET_SIZE, PROTOCOL_VERSION};
 #[cfg(not(wasm_browser))]
 use crate::{client::streams::MaybeTlsStreamChained, protos::relay::RelayCodec};
@@ -74,7 +74,7 @@ impl Conn {
         conn: WebSocketStream,
         key_cache: KeyCache,
         secret_key: &SecretKey,
-    ) -> Result<Self> {
+    ) -> Result<Self, Error> {
         let mut conn = Self::Ws { conn, key_cache };
 
         // exchange information with the server
@@ -89,7 +89,7 @@ impl Conn {
         conn: MaybeTlsStreamChained,
         key_cache: KeyCache,
         secret_key: &SecretKey,
-    ) -> Result<Self> {
+    ) -> Result<Self, Error> {
         let conn = Framed::new(conn, RelayCodec::new(key_cache));
 
         let mut conn = Self::Relay { conn };
@@ -102,7 +102,7 @@ impl Conn {
 }
 
 /// Sends the server handshake message.
-async fn server_handshake(writer: &mut Conn, secret_key: &SecretKey) -> Result<()> {
+async fn server_handshake(writer: &mut Conn, secret_key: &SecretKey) -> Result<(), Error> {
     debug!("server_handshake: started");
     let client_info = ClientInfo {
         version: PROTOCOL_VERSION,

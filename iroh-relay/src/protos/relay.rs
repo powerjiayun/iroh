@@ -14,7 +14,7 @@
 
 use anyhow::{bail, ensure};
 use bytes::{BufMut, Bytes};
-use iroh_base::{PublicKey, SecretKey, Signature};
+use iroh_base::{PublicKey, SecretKey, Signature, SignatureError};
 #[cfg(feature = "server")]
 use n0_future::time::Duration;
 use n0_future::{Sink, SinkExt};
@@ -126,6 +126,22 @@ pub(crate) struct ClientInfo {
     pub(crate) version: usize,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("unexpected frame: got {got}, expected {expected}")]
+    UnexpectedFrame { got: FrameType, expected: FrameType },
+    #[error(transparent)]
+    SerDe(#[from] postcard::Error),
+    #[error("timeout")]
+    Timeout(#[from] tokio::time::error::Elapsed),
+    #[error(transparent)]
+    InvalidSignature(#[from] SignatureError),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 /// Writes complete frame, errors if it is unable to write within the given `timeout`.
 /// Ignores the timeout if `None`
 ///
@@ -135,7 +151,7 @@ pub(crate) async fn write_frame<S: Sink<Frame, Error = std::io::Error> + Unpin>(
     mut writer: S,
     frame: Frame,
     timeout: Option<Duration>,
-) -> anyhow::Result<()> {
+) -> Result<(), Error> {
     if let Some(duration) = timeout {
         tokio::time::timeout(duration, writer.send(frame)).await??;
     } else {
@@ -153,7 +169,7 @@ pub(crate) async fn send_client_key<S: Sink<Frame, Error = ConnSendError> + Unpi
     mut writer: S,
     client_secret_key: &SecretKey,
     client_info: &ClientInfo,
-) -> anyhow::Result<()> {
+) -> Result<(), Error> {
     let msg = postcard::to_stdvec(client_info)?;
     let signature = client_secret_key.sign(&msg);
 
@@ -173,8 +189,7 @@ pub(crate) async fn send_client_key<S: Sink<Frame, Error = ConnSendError> + Unpi
 #[cfg(any(test, feature = "server"))]
 pub(crate) async fn recv_client_key<S: Stream<Item = anyhow::Result<Frame>> + Unpin>(
     stream: S,
-) -> anyhow::Result<(PublicKey, ClientInfo)> {
-    use anyhow::Context;
+) -> Result<(PublicKey, ClientInfo), Error> {
     // the client is untrusted at this point, limit the input size even smaller than our usual
     // maximum frame size, and give a timeout
 
@@ -183,9 +198,7 @@ pub(crate) async fn recv_client_key<S: Stream<Item = anyhow::Result<Frame>> + Un
         std::time::Duration::from_secs(10),
         recv_frame(FrameType::ClientInfo, stream),
     )
-    .await
-    .context("recv_frame timeout")?
-    .context("recv_frame")?;
+    .await??;
 
     if let Frame::ClientInfo {
         client_public_key,
@@ -193,13 +206,12 @@ pub(crate) async fn recv_client_key<S: Stream<Item = anyhow::Result<Frame>> + Un
         signature,
     } = buf
     {
-        client_public_key
-            .verify(&message, &signature)
-            .context("invalid signature")?;
-        let info: ClientInfo = postcard::from_bytes(&message).context("deserialization")?;
+        client_public_key.verify(&message, &signature)?;
+
+        let info: ClientInfo = postcard::from_bytes(&message)?;
         Ok((client_public_key, info))
     } else {
-        anyhow::bail!("expected FrameType::ClientInfo");
+        Err(Error::UnexpectedFrame)
     }
 }
 
@@ -586,19 +598,23 @@ mod framing {
 pub(crate) async fn recv_frame<S: Stream<Item = anyhow::Result<Frame>> + Unpin>(
     frame_type: FrameType,
     mut stream: S,
-) -> anyhow::Result<Frame> {
+) -> Result<Frame, Error> {
     match stream.next().await {
         Some(Ok(frame)) => {
-            ensure!(
-                frame_type == frame.typ(),
-                "expected frame {}, found {}",
-                frame_type,
-                frame.typ()
-            );
+            if frame_type != frame.typ() {
+                return Err(Error::UnexpectedFrame {
+                    got: frame.typ(),
+                    expected: frame_type,
+                });
+            }
             Ok(frame)
         }
-        Some(Err(err)) => Err(err),
-        None => bail!("EOF: unexpected stream end, expected frame {}", frame_type),
+        Some(Err(err)) => Err(err.into()),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "expected frame".to_string(),
+        )
+        .into()),
     }
 }
 

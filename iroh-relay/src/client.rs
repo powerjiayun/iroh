@@ -9,8 +9,8 @@ use std::{
     task::{self, Poll},
 };
 
-use anyhow::{anyhow, bail, Result};
 use conn::Conn;
+use connect_relay::DnsError;
 #[cfg(not(wasm_browser))]
 use hickory_resolver::TokioResolver as DnsResolver;
 use iroh_base::{RelayUrl, SecretKey};
@@ -36,6 +36,21 @@ mod connect_relay;
 pub(crate) mod streams;
 #[cfg(not(wasm_browser))]
 mod util;
+
+/// Client related errors
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Invliad target port")]
+    InvalidTargetPort,
+    #[error("Invalid URL {0}")]
+    InvalidUrl(Url),
+    #[error("Invalid URL for websocket {0}")]
+    InvalidWebsocketUrl(Url),
+    #[error(transparent)]
+    Websocket(#[from] tokio_tungstenite_wasm::Error),
+    #[error(transparent)]
+    Dns(#[from] DnsError),
+}
 
 /// Build a Client.
 #[derive(derive_more::Debug, Clone)]
@@ -138,7 +153,7 @@ impl ClientBuilder {
     }
 
     /// Establishes a new connection to the relay server.
-    pub async fn connect(&self) -> Result<Client> {
+    pub async fn connect(&self) -> Result<Client, Error> {
         let (conn, local_addr) = match self.protocol {
             Protocol::Websocket => {
                 let conn = self.connect_ws().await?;
@@ -167,14 +182,14 @@ impl ClientBuilder {
         Ok(Client { conn, local_addr })
     }
 
-    async fn connect_ws(&self) -> Result<Conn> {
+    async fn connect_ws(&self) -> Result<Conn, Error> {
         let mut dial_url = (*self.url).clone();
         dial_url.set_path(RELAY_PATH);
         // The relay URL is exchanged with the http(s) scheme in tickets and similar.
         // We need to use the ws:// or wss:// schemes when connecting with websockets, though.
         dial_url
             .set_scheme(if self.use_tls() { "wss" } else { "ws" })
-            .map_err(|()| anyhow!("Invalid URL"))?;
+            .map_err(|_| Error::InvalidWebsocketUrl(dial_url.clone()))?;
 
         debug!(%dial_url, "Dialing relay by websocket");
 
@@ -216,7 +231,7 @@ impl Client {
 }
 
 impl Stream for Client {
-    type Item = Result<ReceivedMessage>;
+    type Item = Result<ReceivedMessage, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         Pin::new(&mut self.conn).poll_next(cx)
@@ -302,7 +317,7 @@ impl ClientStream {
 }
 
 impl Stream for ClientStream {
-    type Item = Result<ReceivedMessage>;
+    type Item = Result<ReceivedMessage, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Option<Self::Item>> {
         Pin::new(&mut self.stream).poll_next(cx)
