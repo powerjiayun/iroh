@@ -10,13 +10,14 @@ use std::{
 };
 
 use conn::Conn;
+#[cfg(not(wasm_browser))]
 use connect_relay::DnsError;
 #[cfg(not(wasm_browser))]
 use hickory_resolver::TokioResolver as DnsResolver;
 use iroh_base::{RelayUrl, SecretKey};
 use n0_future::{
     split::{split, SplitSink, SplitStream},
-    Sink, Stream,
+    time, Sink, Stream,
 };
 #[cfg(any(test, feature = "test-utils"))]
 use tracing::warn;
@@ -52,6 +53,7 @@ pub enum Error {
     InvalidWebsocketUrl(Url),
     #[error(transparent)]
     Websocket(#[from] tokio_tungstenite_wasm::Error),
+    #[cfg(not(wasm_browser))]
     #[error(transparent)]
     Dns(#[from] DnsError),
     #[error(transparent)]
@@ -67,7 +69,7 @@ pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("Timeout")]
-    Timeout(#[from] tokio::time::error::Elapsed),
+    Timeout(#[from] time::Elapsed),
     #[error(transparent)]
     Http(#[from] hyper::http::Error),
     #[error("Unexpected frame received {0}")]

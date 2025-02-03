@@ -16,7 +16,7 @@ use bytes::{BufMut, Bytes};
 use iroh_base::{PublicKey, SecretKey, Signature, SignatureError};
 #[cfg(feature = "server")]
 use n0_future::time::Duration;
-use n0_future::{Sink, SinkExt};
+use n0_future::{time, Sink, SinkExt};
 #[cfg(any(test, feature = "server"))]
 use n0_future::{Stream, StreamExt};
 use postcard::experimental::max_size::MaxSize;
@@ -137,7 +137,7 @@ pub enum Error {
     #[error(transparent)]
     SerDe(#[from] postcard::Error),
     #[error("timeout")]
-    Timeout(#[from] tokio::time::error::Elapsed),
+    Timeout(#[from] time::Elapsed),
     #[error(transparent)]
     InvalidSignature(#[from] SignatureError),
     #[error(transparent)]
