@@ -38,18 +38,45 @@ pub(crate) mod streams;
 mod util;
 
 /// Client related errors
+#[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("Invliad target port")]
     InvalidTargetPort,
     #[error("Invalid URL {0}")]
     InvalidUrl(Url),
+    #[error("Invalid Proxy URL {0}")]
+    InvalidProxyUrl(Url),
     #[error("Invalid URL for websocket {0}")]
     InvalidWebsocketUrl(Url),
     #[error(transparent)]
     Websocket(#[from] tokio_tungstenite_wasm::Error),
     #[error(transparent)]
     Dns(#[from] DnsError),
+    #[error(transparent)]
+    Hyper(#[from] hyper::Error),
+    #[error(transparent)]
+    InvalidDnsName(#[from] rustls::pki_types::InvalidDnsNameError),
+    #[error("Unexpected status during upgrade: {0}")]
+    UnexpectedUpgradeStatus(hyper::StatusCode),
+    #[error("Failed proxy connection: {0}")]
+    FailedProxyConnection(hyper::StatusCode),
+    #[error(transparent)]
+    ProtoRelay(#[from] crate::protos::relay::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("Timeout")]
+    Timeout(#[from] tokio::time::error::Elapsed),
+    #[error(transparent)]
+    Http(#[from] hyper::http::Error),
+    #[error("Unexpected frame received {0}")]
+    UnexpectedFrame(crate::protos::relay::FrameType),
+    #[error(transparent)]
+    Utf8(#[from] std::str::Utf8Error),
+    #[cfg(wasm_browser)]
+    #[error("The relay protocol is not available in browsers")]
+    RelayProtoNotAvailable,
 }
 
 /// Build a Client.
@@ -166,9 +193,7 @@ impl ClientBuilder {
                 (conn, Some(local_addr))
             }
             #[cfg(wasm_browser)]
-            Protocol::Relay => {
-                bail!("Can only connect to relay using websockets in browsers.");
-            }
+            Protocol::Relay => return Err(Error::RelayProtoNotAvailable),
         };
 
         event!(

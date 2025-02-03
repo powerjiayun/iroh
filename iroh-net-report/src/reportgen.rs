@@ -921,11 +921,11 @@ async fn run_quic_probe(
         }
     };
     let quic_client = iroh_relay::quic::QuicClient::new(quic_config.ep, quic_config.client_config)
-        .map_err(|e| ProbeError::Error(e, probe.clone()))?;
+        .map_err(|e| ProbeError::Error(e.into(), probe.clone()))?;
     let (addr, latency) = quic_client
         .get_addr_and_latency(relay_addr, host)
         .await
-        .map_err(|e| ProbeError::Error(e, probe.clone()))?;
+        .map_err(|e| ProbeError::Error(e.into(), probe.clone()))?;
     let mut result = ProbeReport::new(probe.clone());
     if matches!(probe, Probe::QuicIpv4 { .. }) {
         result.ipv4_can_send = true;

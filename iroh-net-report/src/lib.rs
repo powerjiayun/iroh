@@ -977,7 +977,7 @@ mod test_utils {
             servers.push(relay_server);
             nodes.push(node);
         }
-        let map = crate::RelayMap::from_nodes(nodes).expect("unuque urls");
+        let map = crate::RelayMap::from_nodes(nodes);
         (servers, map)
     }
 }
@@ -1049,7 +1049,7 @@ mod tests {
                     quic: None,
                 }
             });
-            RelayMap::from_nodes(nodes).expect("generated invalid nodes")
+            RelayMap::from_nodes(nodes)
         }
 
         /// Sets up a simple STUN server binding to `0.0.0.0:0`.

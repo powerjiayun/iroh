@@ -70,9 +70,7 @@ impl ClientBuilder {
 
         let response = if self.use_tls() {
             debug!("Starting TLS handshake");
-            let hostname = self
-                .tls_servername()
-                .ok_or_else(|| anyhow!("No tls servername"))?;
+            let hostname = self.tls_servername()?;
             let hostname = hostname.to_owned();
             let tls_stream = tls_connector.connect(hostname, tcp_stream).await?;
             debug!("tls_connector connect success");
@@ -83,20 +81,14 @@ impl ClientBuilder {
         };
 
         if response.status() != hyper::StatusCode::SWITCHING_PROTOCOLS {
-            bail!(
-                "Unexpected status code: expected {}, actual: {}",
-                hyper::StatusCode::SWITCHING_PROTOCOLS,
-                response.status(),
-            );
+            return Err(Error::UnexpectedUpgradeStatus(response.status()));
         }
 
         debug!("starting upgrade");
-        let upgraded = hyper::upgrade::on(response)
-            .await
-            .context("Upgrade failed")?;
+        let upgraded = hyper::upgrade::on(response).await?;
 
         debug!("connection upgraded");
-        let conn = downcast_upgrade(upgraded)?;
+        let conn = downcast_upgrade(upgraded).expect("must use TcpStream or client::TlsStream");
 
         let conn = Conn::new_relay(conn, self.key_cache.clone(), &self.secret_key).await?;
 
@@ -141,10 +133,13 @@ impl ClientBuilder {
         request_sender.send_request(req).await.map_err(From::from)
     }
 
-    fn tls_servername(&self) -> Option<rustls::pki_types::ServerName> {
-        self.url
+    fn tls_servername(&self) -> Result<rustls::pki_types::ServerName, Error> {
+        let host_str = self
+            .url
             .host_str()
-            .and_then(|s| rustls::pki_types::ServerName::try_from(s).ok())
+            .ok_or_else(|| Error::InvalidUrl(self.url.clone().into()))?;
+        let servername = rustls::pki_types::ServerName::try_from(host_str)?;
+        Ok(servername)
     }
 
     async fn dial_url(
@@ -177,9 +172,8 @@ impl ClientBuilder {
             DIAL_NODE_TIMEOUT,
             async move { TcpStream::connect(addr).await },
         )
-        .await
-        .context("Timeout connecting")?
-        .context("Failed connecting")?;
+        .await??;
+
         tcp_stream.set_nodelay(true)?;
 
         Ok(tcp_stream)
@@ -209,9 +203,7 @@ impl ClientBuilder {
         let tcp_stream = time::timeout(DIAL_NODE_TIMEOUT, async move {
             TcpStream::connect(proxy_addr).await
         })
-        .await
-        .context("Timeout connecting")?
-        .context("Connecting")?;
+        .await??;
 
         tcp_stream.set_nodelay(true)?;
 
@@ -219,14 +211,19 @@ impl ClientBuilder {
         let io = if proxy_url.scheme() == "http" {
             MaybeTlsStream::Raw(tcp_stream)
         } else {
-            let hostname = proxy_url.host_str().context("No hostname in proxy URL")?;
+            let hostname = proxy_url
+                .host_str()
+                .ok_or_else(|| Error::InvalidProxyUrl(proxy_url.clone()))?;
             let hostname = rustls::pki_types::ServerName::try_from(hostname.to_string())?;
             let tls_stream = tls_connector.connect(hostname, tcp_stream).await?;
             MaybeTlsStream::Tls(tls_stream)
         };
         let io = TokioIo::new(io);
 
-        let target_host = self.url.host_str().ok_or(Error::MissingProxyHost)?;
+        let target_host = self
+            .url
+            .host_str()
+            .ok_or_else(|| Error::InvalidUrl(self.url.clone().into()))?;
 
         let port = url_port(&self.url).ok_or(Error::InvalidTargetPort)?;
 
@@ -264,7 +261,7 @@ impl ClientBuilder {
 
         let res = sender.send_request(req).await?;
         if !res.status().is_success() {
-            bail!("Failed to connect to proxy: {}", res.status());
+            return Err(Error::FailedProxyConnection(res.status()));
         }
 
         let upgraded = hyper::upgrade::on(res).await?;

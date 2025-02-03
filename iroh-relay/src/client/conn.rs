@@ -8,7 +8,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use anyhow::{bail, Result};
 use bytes::Bytes;
 use iroh_base::{NodeId, SecretKey};
 use n0_future::{time::Duration, Sink, Stream};
@@ -115,7 +114,7 @@ async fn server_handshake(writer: &mut Conn, secret_key: &SecretKey) -> Result<(
 }
 
 impl Stream for Conn {
-    type Item = Result<ReceivedMessage>;
+    type Item = Result<ReceivedMessage, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match *self {
@@ -126,7 +125,7 @@ impl Stream for Conn {
                     let message = ReceivedMessage::try_from(frame);
                     Poll::Ready(Some(message))
                 }
-                Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err))),
+                Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err.into()))),
                 Poll::Ready(None) => Poll::Ready(None),
             },
             Self::Ws {
@@ -135,7 +134,9 @@ impl Stream for Conn {
             } => match Pin::new(conn).poll_next(cx) {
                 Poll::Ready(Some(Ok(tokio_tungstenite_wasm::Message::Binary(vec)))) => {
                     let frame = Frame::decode_from_ws_msg(vec, key_cache);
-                    let message = frame.and_then(ReceivedMessage::try_from);
+                    let message = frame
+                        .map_err(Into::into)
+                        .and_then(ReceivedMessage::try_from);
                     Poll::Ready(Some(message))
                 }
                 Poll::Ready(Some(Ok(msg))) => {
@@ -291,7 +292,7 @@ pub enum ReceivedMessage {
 }
 
 impl TryFrom<Frame> for ReceivedMessage {
-    type Error = anyhow::Error;
+    type Error = Error;
 
     fn try_from(frame: Frame) -> std::result::Result<Self, Self::Error> {
         match frame {
@@ -326,7 +327,7 @@ impl TryFrom<Frame> for ReceivedMessage {
                     try_for,
                 })
             }
-            _ => bail!("unexpected packet: {:?}", frame.typ()),
+            _ => Err(Error::UnexpectedFrame(frame.typ())),
         }
     }
 }

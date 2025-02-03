@@ -850,7 +850,8 @@ mod tests {
             else {
                 continue;
             };
-            return res.context("stream finished")?;
+            let res = res.context("stream finished")??;
+            return Ok(res);
         }
         panic!("failed to send and recv message");
     }

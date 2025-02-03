@@ -3,7 +3,6 @@ use std::{
     sync::OnceLock,
 };
 
-use anyhow::Result;
 use hickory_resolver::{Resolver, TokioResolver};
 
 /// The DNS resolver type used throughout `iroh`.
@@ -16,7 +15,7 @@ static DNS_RESOLVER: OnceLock<TokioResolver> = OnceLock::new();
 /// The default resolver can be cheaply cloned and is shared throughout the running process.
 /// It is configured to use the system's DNS configuration.
 pub fn default_resolver() -> &'static DnsResolver {
-    DNS_RESOLVER.get_or_init(|| create_default_resolver().expect("unable to create DNS resolver"))
+    DNS_RESOLVER.get_or_init(create_default_resolver)
 }
 
 /// Deprecated IPv6 site-local anycast addresses still configured by windows.
@@ -38,7 +37,7 @@ const WINDOWS_BAD_SITE_LOCAL_DNS_SERVERS: [IpAddr; 3] = [
 /// We first try to read the system's resolver from `/etc/resolv.conf`.
 /// This does not work at least on some Androids, therefore we fallback
 /// to the default `ResolverConfig` which uses eg. to google's `8.8.8.8` or `8.8.4.4`.
-fn create_default_resolver() -> Result<TokioResolver> {
+fn create_default_resolver() -> TokioResolver {
     let (system_config, mut options) =
         hickory_resolver::system_conf::read_system_conf().unwrap_or_default();
 
@@ -60,6 +59,5 @@ fn create_default_resolver() -> Result<TokioResolver> {
     // see [`ResolverExt::lookup_ipv4_ipv6`] for info on why we avoid `LookupIpStrategy::Ipv4AndIpv6`
     options.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4thenIpv6;
 
-    let resolver = Resolver::tokio(config, options);
-    Ok(resolver)
+    Resolver::tokio(config, options)
 }
