@@ -787,7 +787,7 @@ mod tests {
 mod test_dns_pkarr {
     use anyhow::Result;
     use iroh_base::{NodeAddr, SecretKey};
-    use iroh_relay::RelayMap;
+    use iroh_relay::{dns::node_info::UserData, RelayMap};
     use n0_future::time::Duration;
     use tokio_util::task::AbortOnDropHandle;
     use tracing_test::traced_test;
@@ -845,7 +845,9 @@ mod test_dns_pkarr {
 
         let resolver = DnsResolver::with_nameserver(dns_pkarr_server.nameserver);
         let publisher = PkarrPublisher::new(secret_key, dns_pkarr_server.pkarr_url.clone());
-        let data = NodeData::new(relay_url.clone(), Default::default());
+        let user_data: UserData = "foobar".parse().unwrap();
+        let data =
+            NodeData::new(relay_url.clone(), Default::default()).with_user_data(user_data.clone());
         // does not block, update happens in background task
         publisher.update_addr_info(&data);
         // wait until our shared state received the update from pkarr publishing
@@ -857,8 +859,10 @@ mod test_dns_pkarr {
             relay_url,
             direct_addresses: Default::default(),
         };
+        let (resolved_addr, resolved_user_data) = resolved.into_parts();
 
-        assert_eq!(resolved, expected);
+        assert_eq!(resolved_addr, expected);
+        assert_eq!(resolved_user_data, Some(user_data));
         Ok(())
     }
 

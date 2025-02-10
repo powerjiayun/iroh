@@ -67,14 +67,15 @@ impl Discovery for DnsDiscovery {
         let resolver = ep.dns_resolver().clone();
         let origin_domain = self.origin_domain.clone();
         let fut = async move {
-            let node_addr = resolver
+            let node_info = resolver
                 .lookup_node_by_id_staggered(&node_id, &origin_domain, DNS_STAGGERING_MS)
                 .await?;
+            let (node_addr, user_data) = node_info.into_parts();
             Ok(DiscoveryItem {
                 node_addr,
+                user_data,
                 provenance: "dns",
                 last_updated: None,
-                user_data: None,
             })
         };
         let stream = n0_future::stream::once_future(fut);

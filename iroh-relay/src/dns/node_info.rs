@@ -302,6 +302,18 @@ impl NodeInfo {
     pub fn to_txt_strings(&self) -> Vec<String> {
         self.to_attrs().to_txt_strings().collect()
     }
+
+    /// Converts into a [`NodeAddr`] and optional [`UserData`].
+    pub fn into_parts(self) -> (NodeAddr, Option<UserData>) {
+        (
+            NodeAddr {
+                node_id: self.node_id,
+                relay_url: self.data.relay_url,
+                direct_addresses: self.data.direct_addresses,
+            },
+            self.data.user_data,
+        )
+    }
 }
 
 /// Parses a [`NodeId`] from iroh DNS name.
