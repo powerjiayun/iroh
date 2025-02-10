@@ -235,12 +235,12 @@ impl DiscoveryItem {
         provenance: &'static str,
         last_updated: Option<u64>,
     ) -> Self {
-        let node_addr = node_data.into_node_addr(node_id);
+        let (node_addr, user_data) = node_data.into_node_addr_and_user_data(node_id);
         Self {
             node_addr,
             provenance,
             last_updated,
-            user_data: None,
+            user_data,
         }
     }
 }

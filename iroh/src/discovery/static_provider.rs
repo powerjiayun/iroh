@@ -21,7 +21,7 @@ use n0_future::{
     time::SystemTime,
 };
 
-use super::{Discovery, DiscoveryItem, NodeData};
+use super::{Discovery, DiscoveryItem, NodeData, UserData};
 
 /// A static node discovery to manually add node addressing information.
 ///
@@ -121,7 +121,7 @@ impl StaticProvider {
     pub fn from_node_addrs(infos: impl IntoIterator<Item = impl Into<NodeAddr>>) -> Self {
         let res = Self::default();
         for info in infos {
-            res.add_node_addr(info);
+            res.add_node_addr(info, None);
         }
         res
     }
@@ -129,11 +129,15 @@ impl StaticProvider {
     /// Sets node addressing information for the given node ID.
     ///
     /// This will completely overwrite any existing info for the node.
-    pub fn set_node_addr(&self, info: impl Into<NodeAddr>) -> Option<NodeAddr> {
+    pub fn set_node_addr(
+        &self,
+        node_addr: impl Into<NodeAddr>,
+        user_data: Option<UserData>,
+    ) -> Option<NodeAddr> {
         let last_updated = SystemTime::now();
-        let node_addr: NodeAddr = info.into();
+        let node_addr: NodeAddr = node_addr.into();
         let node_id = node_addr.node_id;
-        let data: NodeData = node_addr.into();
+        let data = NodeData::from(node_addr).with_user_data(user_data);
         let mut guard = self.nodes.write().expect("poisoned");
         let previous = guard.insert(node_id, NodeInfo { data, last_updated });
         previous.map(|x| x.data.into_node_addr(node_id))
@@ -144,7 +148,7 @@ impl StaticProvider {
     /// The provided addressing information is combined with the existing info in the static
     /// provider.  Any new direct addresses are added to those already present while the
     /// relay URL is overwritten.
-    pub fn add_node_addr(&self, info: impl Into<NodeAddr>) {
+    pub fn add_node_addr(&self, info: impl Into<NodeAddr>, user_data: Option<UserData>) {
         let node_addr: NodeAddr = info.into();
         let last_updated = SystemTime::now();
         let mut guard = self.nodes.write().expect("poisoned");
@@ -156,11 +160,12 @@ impl StaticProvider {
                     .direct_addresses
                     .extend(node_addr.direct_addresses);
                 existing.data.relay_url = node_addr.relay_url;
+                existing.data.user_data = user_data;
                 existing.last_updated = last_updated;
             }
             Entry::Vacant(entry) => {
                 entry.insert(NodeInfo {
-                    data: NodeData::from(node_addr),
+                    data: NodeData::from(node_addr).with_user_data(user_data),
                     last_updated,
                 });
             }
@@ -172,6 +177,13 @@ impl StaticProvider {
         let guard = self.nodes.read().expect("poisoned");
         let info = guard.get(&node_id)?;
         Some(info.data.clone().into_node_addr(node_id))
+    }
+
+    /// Returns the optional user-defined data for the given node ID.
+    pub fn get_user_data(&self, node_id: NodeId) -> Option<UserData> {
+        let guard = self.nodes.read().expect("poisoned");
+        let info = guard.get(&node_id)?;
+        info.data.user_data.clone()
     }
 
     /// Removes all node addressing information for the given node ID.
@@ -241,11 +253,14 @@ mod tests {
             relay_url: Some("https://example.com".parse()?),
             direct_addresses: Default::default(),
         };
-        discovery.add_node_addr(addr.clone());
+        let user_data = Some("foobar".parse().unwrap());
+        discovery.add_node_addr(addr.clone(), user_data);
 
         let back = discovery.get_node_addr(key.public()).context("no addr")?;
 
         assert_eq!(back, addr);
+        let user_data = discovery.get_user_data(key.public());
+        assert_eq!(user_data.map(|d| d.to_string()), Some("foobar".to_string()));
 
         let removed = discovery
             .remove_node_addr(key.public())
@@ -253,6 +268,8 @@ mod tests {
         assert_eq!(removed, addr);
         let res = discovery.get_node_addr(key.public());
         assert!(res.is_none());
+        let user_data = discovery.get_user_data(key.public());
+        assert!(user_data.is_none());
 
         Ok(())
     }

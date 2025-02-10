@@ -118,8 +118,8 @@ impl NodeData {
     }
 
     /// Sets the user data.
-    pub fn with_user_data(mut self, user_data: UserData) -> Self {
-        self.user_data = Some(user_data);
+    pub fn with_user_data(mut self, user_data: Option<UserData>) -> Self {
+        self.user_data = user_data;
         self
     }
 
@@ -135,6 +135,18 @@ impl NodeData {
             relay_url: self.relay_url,
             direct_addresses: self.direct_addresses,
         }
+    }
+
+    /// Converts into a [`NodeAddr`] and [`UserData`].
+    pub fn into_node_addr_and_user_data(self, node_id: NodeId) -> (NodeAddr, Option<UserData>) {
+        (
+            NodeAddr {
+                node_id,
+                relay_url: self.relay_url,
+                direct_addresses: self.direct_addresses,
+            },
+            self.user_data,
+        )
     }
 }
 
