@@ -232,10 +232,16 @@ impl From<&TxtAttrs<IrohAttr>> for NodeInfo {
             .flatten()
             .filter_map(|s| SocketAddr::from_str(s).ok())
             .collect();
+        let user_data = attrs
+            .get(&IrohAttr::UserData)
+            .into_iter()
+            .flatten()
+            .next()
+            .and_then(|s| UserData::from_str(s).ok());
         let data = NodeData {
             relay_url: relay_url.map(Into::into),
             direct_addresses,
-            user_data: None,
+            user_data,
         };
         Self { node_id, data }
     }
@@ -317,6 +323,8 @@ pub(super) enum IrohAttr {
     Relay,
     /// Direct address.
     Addr,
+    /// User-defined data
+    UserData,
 }
 
 /// Attributes parsed from [`IROH_TXT_NAME`] TXT records.
