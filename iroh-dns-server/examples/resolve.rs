@@ -57,5 +57,8 @@ async fn main() -> anyhow::Result<()> {
     for addr in resolved.data.direct_addrs() {
         println!("    addr={addr}")
     }
+    if let Some(user_data) = resolved.user_data {
+        println!("    user-data={user_data}")
+    }
     Ok(())
 }
