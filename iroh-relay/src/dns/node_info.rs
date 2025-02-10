@@ -173,7 +173,7 @@ pub struct UserData(String);
 /// The max byte length allowed for user defined data.
 pub const USER_DATA_MAX_LENGTH: usize = 255;
 
-/// Error returned when an input value is too long for [`UserDefinedData`].
+/// Error returned when an input value is too long for [`UserData`].
 #[derive(Debug, thiserror::Error)]
 #[error("User-defined data exceeds max length")]
 pub struct MaxLengthExceededError;
@@ -181,7 +181,7 @@ pub struct MaxLengthExceededError;
 impl TryFrom<String> for UserData {
     type Error = MaxLengthExceededError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.as_bytes().len() > USER_DATA_MAX_LENGTH {
+        if value.len() > USER_DATA_MAX_LENGTH {
             Err(MaxLengthExceededError)
         } else {
             Ok(Self(value))
@@ -193,7 +193,7 @@ impl FromStr for UserData {
     type Err = MaxLengthExceededError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        if s.as_bytes().len() > USER_DATA_MAX_LENGTH {
+        if s.len() > USER_DATA_MAX_LENGTH {
             Err(MaxLengthExceededError)
         } else {
             Ok(Self(s.to_string()))

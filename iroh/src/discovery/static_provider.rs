@@ -54,11 +54,14 @@ use super::{Discovery, DiscoveryItem, NodeData, UserData};
 ///
 /// /// Sometime later add a RelayUrl for a fake NodeId.
 /// let key = SecretKey::from_bytes(&[0u8; 32]); // Do not use fake secret keys!
-/// discovery.add_node_addr(NodeAddr {
-///     node_id: key.public(),
-///     relay_url: Some("https://example.com".parse()?),
-///     direct_addresses: Default::default(),
-/// });
+/// discovery.add_node_addr(
+///     NodeAddr {
+///         node_id: key.public(),
+///         relay_url: Some("https://example.com".parse()?),
+///         direct_addresses: Default::default(),
+///     },
+///     None,
+/// );
 ///
 /// # Ok(())
 /// # }
