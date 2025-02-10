@@ -4376,8 +4376,7 @@ dependencies = [
 [[package]]
 name = "swarm-discovery"
 version = "0.3.0-alpha.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58b529764e2f746ef954505dd7cb3c03331bd678c52a387e4a86540577f41e45"
+source = "git+https://github.com/Frando/swarm-discovery.git?branch=feat/txt#9fc9bb6f2f0656532cc182f8b46ad512bcab7c90"
 dependencies = [
  "acto",
  "anyhow",
