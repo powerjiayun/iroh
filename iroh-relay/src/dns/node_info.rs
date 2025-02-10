@@ -34,7 +34,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fmt::Display,
+    fmt::{self, Display},
     hash::Hash,
     net::SocketAddr,
     str::FromStr,
@@ -91,6 +91,8 @@ pub struct NodeData {
     pub relay_url: Option<RelayUrl>,
     /// Direct addresses where this node can be reached.
     pub direct_addresses: BTreeSet<SocketAddr>,
+    /// Optional user-defined [`UserData`] for this node.
+    pub user_data: Option<UserData>,
 }
 
 impl NodeData {
@@ -99,6 +101,7 @@ impl NodeData {
         Self {
             relay_url,
             direct_addresses,
+            user_data: None,
         }
     }
 
@@ -111,6 +114,12 @@ impl NodeData {
     /// Sets the direct addresses.
     pub fn with_direct_addrs(mut self, direct_addrs: BTreeSet<SocketAddr>) -> Self {
         self.direct_addresses = direct_addrs;
+        self
+    }
+
+    /// Sets the user data.
+    pub fn with_user_data(mut self, user_data: UserData) -> Self {
+        self.user_data = Some(user_data);
         self
     }
 
@@ -134,7 +143,61 @@ impl From<NodeAddr> for NodeData {
         Self {
             relay_url: node_addr.relay_url,
             direct_addresses: node_addr.direct_addresses,
+            user_data: None,
         }
+    }
+}
+
+// User defined data that can be published and resolved in Discovery.
+///
+/// Below the hood this is a utf-8 String that is less than or equal to 253 bytes.
+///
+/// Iroh does not keep track of or examine user defined data.
+///
+/// TODO: more explanation of how to get the user defined data of a node.
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct UserData(String);
+
+/// The max byte length allowed for user defined data.
+pub const USER_DATA_MAX_LENGTH: usize = 255;
+
+/// Error returned when an input value is too long for [`UserDefinedData`].
+#[derive(Debug, thiserror::Error)]
+#[error("User-defined data exceeds max length")]
+pub struct MaxLengthExceededError;
+
+impl TryFrom<String> for UserData {
+    type Error = MaxLengthExceededError;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.as_bytes().len() > USER_DATA_MAX_LENGTH {
+            Err(MaxLengthExceededError)
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+impl FromStr for UserData {
+    type Err = MaxLengthExceededError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if s.as_bytes().len() > USER_DATA_MAX_LENGTH {
+            Err(MaxLengthExceededError)
+        } else {
+            Ok(Self(s.to_string()))
+        }
+    }
+}
+
+impl fmt::Display for UserData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl AsRef<str> for UserData {
+    fn as_ref(&self) -> &str {
+        &self.0
     }
 }
 
@@ -172,6 +235,7 @@ impl From<&TxtAttrs<IrohAttr>> for NodeInfo {
         let data = NodeData {
             relay_url: relay_url.map(Into::into),
             direct_addresses,
+            user_data: None,
         };
         Self { node_id, data }
     }

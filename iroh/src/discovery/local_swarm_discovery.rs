@@ -357,6 +357,7 @@ fn peer_to_discovery_item(peer: &Peer, node_id: &NodeId) -> DiscoveryItem {
         },
         provenance: NAME,
         last_updated: None,
+        user_data: None,
     }
 }
 

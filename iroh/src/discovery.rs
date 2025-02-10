@@ -108,7 +108,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, ensure, Result};
 use iroh_base::{NodeAddr, NodeId};
-pub use iroh_relay::dns::node_info::{NodeData, NodeInfo};
+pub use iroh_relay::dns::node_info::{NodeData, NodeInfo, UserData};
 use n0_future::{
     stream::{Boxed as BoxStream, StreamExt},
     task::{self, AbortOnDropHandle},
@@ -195,6 +195,7 @@ impl<T: Discovery> Discovery for Arc<T> {}
 
 /// The results returned from [`Discovery::resolve`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct DiscoveryItem {
     /// The [`NodeId`] whose address we have discovered
     pub node_addr: NodeAddr,
@@ -207,6 +208,8 @@ pub struct DiscoveryItem {
     /// Must be microseconds since the unix epoch.
     // TODO(ramfox): this is currently unused. As we develop more `DiscoveryService`s, we may discover that we do not need this. It is only truly relevant when comparing `relay_urls`, since we can attempt to dial any number of socket addresses, but expect each node to have one "home relay" that we will attempt to contact them on. This means we would need some way to determine which relay url to choose between, if more than one relay url is reported.
     pub last_updated: Option<u64>,
+    /// The optional user-defined data for this node.
+    pub user_data: Option<UserData>,
 }
 
 impl DiscoveryItem {
@@ -221,6 +224,7 @@ impl DiscoveryItem {
             node_addr,
             provenance,
             last_updated,
+            user_data: None,
         }
     }
 
@@ -236,6 +240,7 @@ impl DiscoveryItem {
             node_addr,
             provenance,
             last_updated,
+            user_data: None,
         }
     }
 }

@@ -74,6 +74,7 @@ impl Discovery for DnsDiscovery {
                 node_addr,
                 provenance: "dns",
                 last_updated: None,
+                user_data: None,
             })
         };
         let stream = n0_future::stream::once_future(fut);

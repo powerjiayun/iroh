@@ -109,6 +109,7 @@ impl Inner {
                         node_addr,
                         provenance: "relay",
                         last_updated: None,
+                        user_data: None,
                     }))
                 }
                 Err(_err) => {
