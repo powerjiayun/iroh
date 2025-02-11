@@ -4376,7 +4376,7 @@ dependencies = [
 [[package]]
 name = "swarm-discovery"
 version = "0.3.0-alpha.1"
-source = "git+https://github.com/Frando/swarm-discovery.git?branch=feat/txt#9fc9bb6f2f0656532cc182f8b46ad512bcab7c90"
+source = "git+https://github.com/Frando/swarm-discovery.git?branch=feat/txt#9c6af16bf4a74693b232f87fcb8c325bb4f6af3e"
 dependencies = [
  "acto",
  "anyhow",
