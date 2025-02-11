@@ -6,7 +6,7 @@ use iroh::{
     discovery::{
         dns::{N0_DNS_NODE_ORIGIN_PROD, N0_DNS_NODE_ORIGIN_STAGING},
         pkarr::{PkarrRelayClient, N0_DNS_PKARR_RELAY_PROD, N0_DNS_PKARR_RELAY_STAGING},
-        NodeData,
+        NodeData, UserData,
     },
     dns::node_info::{NodeIdExt, NodeInfo, IROH_TXT_NAME},
     NodeId, SecretKey,
@@ -47,7 +47,7 @@ struct Cli {
     addr: Vec<SocketAddr>,
     /// User data to publish for this node
     #[clap(short, long)]
-    user_data: Option<String>,
+    user_data: Option<UserData>,
     /// Create a new node secret if IROH_SECRET is unset. Only for development / debugging.
     #[clap(short, long)]
     create: bool,
@@ -86,16 +86,18 @@ async fn main() -> Result<()> {
     for addr in &args.addr {
         println!("    addr={addr}");
     }
+    if let Some(user_data) = &args.user_data {
+        println!("    user-data={user_data}");
+    }
     println!();
     println!("publish to {pkarr_relay} ...");
 
     let pkarr = PkarrRelayClient::new(pkarr_relay);
-    let data = NodeData::default().with_relay_url(args.relay_url);
-    let data = if let Some(user_data) = args.user_data {
-        data.with_user_data(user_data.parse()?)
-    } else {
-        data
-    };
+    let data = NodeData::new(
+        args.relay_url.map(Into::into),
+        args.addr.into_iter().collect(),
+    )
+    .with_user_data(args.user_data);
     let node_info = NodeInfo::new(node_id, data);
     let signed_packet = node_info.to_pkarr_signed_packet(&secret_key, 30)?;
     pkarr.publish(&signed_packet).await?;
