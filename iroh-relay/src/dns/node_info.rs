@@ -80,7 +80,9 @@ impl NodeIdExt for NodeId {
 
 /// The information that can be published about a node in discovery services.
 ///
-/// This includes an optional [`RelayUrl`] and a set of direct addresses.
+/// This includes an optional [`RelayUrl`], a set of direct addresses, and the optional
+/// [`UserData`], a string that can be set by applications and is not parsed or used by iroh
+/// itself.
 ///
 /// The fields are not public, but there are setter and getter functions for all fields
 /// contained in the struct.
