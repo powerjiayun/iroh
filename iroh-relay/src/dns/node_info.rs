@@ -173,7 +173,11 @@ impl From<NodeAddr> for NodeData {
 pub struct UserData(String);
 
 /// The max byte length allowed for user defined data.
-pub const USER_DATA_MAX_LENGTH: usize = 255;
+///
+/// In DNS discovery services, the user data is stored in a TXT record character string,
+/// which has a max length of 255 bytes. We need to subtract "user-data=", which leaves
+/// 245 bytes for the actual user data.
+pub const USER_DATA_MAX_LENGTH: usize = 245;
 
 /// Error returned when an input value is too long for [`UserData`].
 #[derive(Debug, thiserror::Error)]
