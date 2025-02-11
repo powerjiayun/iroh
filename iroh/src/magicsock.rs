@@ -69,7 +69,7 @@ use crate::endpoint::PathSelection;
 use crate::{
     defaults::timeouts::NET_REPORT_TIMEOUT,
     disco::{self, CallMeMaybe, SendAddr},
-    discovery::{Discovery, DiscoveryItem},
+    discovery::{Discovery, DiscoveryItem, DiscoverySubscribers},
     dns::DnsResolver,
     key::{public_ed_box, secret_ed_box, DecryptionError, SharedSecret},
     watchable::{Watchable, Watcher},
@@ -277,6 +277,8 @@ pub(crate) struct MagicSock {
     /// May only be used in tests.
     #[cfg(any(test, feature = "test-utils"))]
     insecure_skip_relay_cert_verify: bool,
+
+    pub(crate) discovery_subscribers: DiscoverySubscribers,
 }
 
 impl MagicSock {
@@ -1700,6 +1702,7 @@ impl Handle {
             dns_resolver,
             #[cfg(any(test, feature = "test-utils"))]
             insecure_skip_relay_cert_verify,
+            discovery_subscribers: DiscoverySubscribers::new(),
         });
 
         let mut endpoint_config = quinn::EndpointConfig::default();
@@ -2330,6 +2333,7 @@ impl Actor {
                         }) {
                         warn!(?discovery_item.node_addr, "unable to add discovered node address to the node map: {e:?}");
                     }
+                    self.msock.discovery_subscribers.send(discovery_item);
                 }
             }
         }
