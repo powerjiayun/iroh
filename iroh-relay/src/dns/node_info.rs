@@ -306,7 +306,7 @@ impl NodeInfo {
     }
 
     /// Converts into a [`NodeAddr`] and optional [`UserData`].
-    pub fn into_parts(self) -> (NodeAddr, Option<UserData>) {
+    pub fn into_node_addr_and_user_data(self) -> (NodeAddr, Option<UserData>) {
         (
             NodeAddr {
                 node_id: self.node_id,

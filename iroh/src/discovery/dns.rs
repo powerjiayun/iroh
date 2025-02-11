@@ -70,7 +70,7 @@ impl Discovery for DnsDiscovery {
             let node_info = resolver
                 .lookup_node_by_id_staggered(&node_id, &origin_domain, DNS_STAGGERING_MS)
                 .await?;
-            let (node_addr, user_data) = node_info.into_parts();
+            let (node_addr, user_data) = node_info.into_node_addr_and_user_data();
             Ok(DiscoveryItem {
                 node_addr,
                 user_data,

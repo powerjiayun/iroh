@@ -859,7 +859,7 @@ mod test_dns_pkarr {
             relay_url,
             direct_addresses: Default::default(),
         };
-        let (resolved_addr, resolved_user_data) = resolved.into_parts();
+        let (resolved_addr, resolved_user_data) = resolved.into_node_addr_and_user_data();
 
         assert_eq!(resolved_addr, expected);
         assert_eq!(resolved_user_data, Some(user_data));
