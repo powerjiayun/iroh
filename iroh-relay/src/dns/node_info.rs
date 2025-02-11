@@ -373,6 +373,9 @@ impl From<&NodeInfo> for TxtAttrs<IrohAttr> {
         for addr in &info.data.direct_addresses {
             attrs.push((IrohAttr::Addr, addr.to_string()));
         }
+        if let Some(user_data) = &info.data.user_data {
+            attrs.push((IrohAttr::UserData, user_data.to_string()));
+        }
         Self::from_parts(info.node_id, attrs.into_iter())
     }
 }
@@ -582,7 +585,8 @@ mod tests {
         let node_data = NodeData::new(
             Some("https://example.com".parse().unwrap()),
             ["127.0.0.1:1234".parse().unwrap()].into_iter().collect(),
-        );
+        )
+        .with_user_data(Some("foobar".parse().unwrap()));
         let node_id = "vpnk377obfvzlipnsfbqba7ywkkenc4xlpmovt5tsfujoa75zqia"
             .parse()
             .unwrap();
@@ -599,7 +603,8 @@ mod tests {
         let node_data = NodeData::new(
             Some("https://example.com".parse().unwrap()),
             ["127.0.0.1:1234".parse().unwrap()].into_iter().collect(),
-        );
+        )
+        .with_user_data(Some("foobar".parse().unwrap()));
         let expected = NodeInfo::new(secret_key.public(), node_data);
         let packet = expected.to_pkarr_signed_packet(&secret_key, 30).unwrap();
         let actual = NodeInfo::from_pkarr_signed_packet(&packet).unwrap();

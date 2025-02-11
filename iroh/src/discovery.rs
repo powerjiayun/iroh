@@ -853,6 +853,7 @@ mod test_dns_pkarr {
         // wait until our shared state received the update from pkarr publishing
         dns_pkarr_server.on_node(&node_id, PUBLISH_TIMEOUT).await?;
         let resolved = resolver.lookup_node_by_id(&node_id, &origin).await?;
+        println!("resolved {resolved:?}");
 
         let expected = NodeAddr {
             node_id,
