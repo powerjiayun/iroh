@@ -32,6 +32,7 @@ use url::Url;
 use crate::{
     discovery::{
         dns::DnsDiscovery, pkarr::PkarrPublisher, ConcurrentDiscovery, Discovery, DiscoveryTask,
+        UserData,
     },
     dns::DnsResolver,
     magicsock::{self, Handle, NodeIdMappedAddr},
@@ -99,6 +100,7 @@ pub struct Builder {
     keylog: bool,
     #[debug(skip)]
     discovery: Vec<DiscoveryBuilder>,
+    discovery_user_data: Option<UserData>,
     proxy_url: Option<Url>,
     /// List of known nodes. See [`Builder::known_nodes`].
     node_map: Option<Vec<NodeAddr>>,
@@ -122,6 +124,7 @@ impl Default for Builder {
             transport_config,
             keylog: Default::default(),
             discovery: Default::default(),
+            discovery_user_data: Default::default(),
             proxy_url: None,
             node_map: None,
             dns_resolver: None,
@@ -172,6 +175,7 @@ impl Builder {
             relay_map,
             node_map: self.node_map,
             discovery,
+            discovery_user_data: self.discovery_user_data,
             proxy_url: self.proxy_url,
             dns_resolver,
             server_config,
@@ -364,6 +368,13 @@ impl Builder {
                 .map(|x| Box::new(x) as _)
                 .ok()
         }));
+        self
+    }
+
+    /// Set the user-defined data published with this node's addresses
+    /// to the configured discovery services.
+    pub fn user_data_for_discovery(mut self, user_data: UserData) -> Self {
+        self.discovery_user_data = Some(user_data);
         self
     }
 
@@ -980,6 +991,14 @@ impl Endpoint {
     /// the network change itself, there is no harm in calling this function.
     pub async fn network_change(&self) {
         self.msock.network_change().await;
+    }
+
+    // # Methods to update internal state.
+
+    /// Set the user-defined data published with this node's addresses
+    /// to the configured discovery services.
+    pub fn set_user_data_for_discovery(&self, user_data: Option<UserData>) {
+        self.msock.set_user_data_for_discovery(user_data);
     }
 
     // # Methods for terminating the endpoint.
