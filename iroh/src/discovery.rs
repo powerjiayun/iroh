@@ -826,7 +826,7 @@ mod test_dns_pkarr {
             .lookup_node_by_id(&node_info.node_id, &origin)
             .await?;
 
-        assert_eq!(resolved, node_info.into());
+        assert_eq!(resolved, node_info);
 
         Ok(())
     }

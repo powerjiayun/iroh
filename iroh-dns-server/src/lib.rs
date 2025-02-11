@@ -182,7 +182,7 @@ mod tests {
         let res = resolver.lookup_node_by_id(&node_id, origin).await?;
 
         assert_eq!(res.node_id, node_id);
-        assert_eq!(res.data.relay_url(), Some(&relay_url));
+        assert_eq!(res.data.relay_url.as_ref(), Some(&relay_url));
 
         server.shutdown().await?;
         Ok(())
@@ -254,7 +254,7 @@ mod tests {
         let res = resolver.lookup_node_by_id(&node_id, origin).await?;
 
         assert_eq!(res.node_id, node_id);
-        assert_eq!(res.data.relay_url(), Some(&relay_url));
+        assert_eq!(res.data.relay_url.as_ref(), Some(&relay_url));
 
         server.shutdown().await?;
         for mut node in testnet.nodes {
