@@ -166,7 +166,6 @@ impl LocalSwarmDiscovery {
                         msg
                     }
                     Ok(Some(data)) = addrs_change.updated() => {
-                        println!("PUBLISH {data:?}");
                         tracing::trace!(?data, "LocalSwarmDiscovery address changed");
                         discovery.remove_all();
                         let addrs =
